@@ -1,6 +1,11 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { prisma } from '../config/prisma.js';
+import { registrarConsumo } from '../controllers/consumos.js';
+import { agregarParticipante } from '../controllers/participantes.js';
 import { HttpError } from '../middlewares/errorHandler.js';
+import { validateBody } from '../middlewares/validateBody.js';
+import { crearConsumoSchema } from '../validators/consumos.js';
+import { agregarParticipanteSchema } from '../validators/participantes.js';
 import { crearEventoSchema } from '../validators/schemas.js';
 
 const router = Router();
@@ -35,5 +40,11 @@ router.post('/events', async (req: Request, res: Response, next: NextFunction): 
     next(error);
   }
 });
+
+// Agregar un comensal a la mesa (usuario registrado o invitado fantasma)
+router.post('/events/:id/participants', validateBody(agregarParticipanteSchema), agregarParticipante);
+
+// Registrar un consumo individual o compartido en centavos
+router.post('/events/:id/consumptions', validateBody(crearConsumoSchema), registrarConsumo);
 
 export default router;

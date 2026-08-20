@@ -35,3 +35,17 @@ export function repartirCentavosSobrantes(montosDolares: number[], totalDolares:
 
   return partes;
 }
+
+// Divide un total ENTERO de centavos entre N participantes de forma exacta:
+// parte entera para todos y el sobrante (1 centavo) para los primeros.
+// La suma SIEMPRE cuadra con el total.
+export function repartirCentavosExactos(totalCentavos: number, cantidad: number): number[] {
+  if (cantidad <= 0) {
+    return [];
+  }
+
+  const base = Math.floor(totalCentavos / cantidad);
+  const sobrante = totalCentavos % cantidad;
+
+  return Array.from({ length: cantidad }, (_, i) => base + (i < sobrante ? 1 : 0));
+}

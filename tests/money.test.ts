@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { centavosADolares, dolaresACentavos, repartirCentavosSobrantes } from '../src/utils/money.js';
+import {
+  centavosADolares,
+  dolaresACentavos,
+  repartirCentavosExactos,
+  repartirCentavosSobrantes
+} from '../src/utils/money.js';
 
 describe('dolaresACentavos', () => {
   it('convierte sin errores de precisión de punto flotante', () => {
@@ -45,5 +50,29 @@ describe('repartirCentavosSobrantes', () => {
 
   it('lista vacía devuelve lista vacía', () => {
     expect(repartirCentavosSobrantes([], 100)).toEqual([]);
+  });
+});
+
+describe('repartirCentavosExactos', () => {
+  it('10000 entre 3 da [3334, 3333, 3333]', () => {
+    expect(repartirCentavosExactos(10000, 3)).toEqual([3334, 3333, 3333]);
+  });
+
+  it('la suma siempre cuadra con el total', () => {
+    const totales = [1, 99, 10000, 10001, 12345];
+    for (const total of totales) {
+      for (const cantidad of [1, 2, 3, 4, 7]) {
+        const partes = repartirCentavosExactos(total, cantidad);
+        expect(partes.reduce((a, b) => a + b, 0)).toBe(total);
+      }
+    }
+  });
+
+  it('divide exacto cuando el total es múltiplo', () => {
+    expect(repartirCentavosExactos(10000, 4)).toEqual([2500, 2500, 2500, 2500]);
+  });
+
+  it('cantidad inválida devuelve lista vacía', () => {
+    expect(repartirCentavosExactos(100, 0)).toEqual([]);
   });
 });

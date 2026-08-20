@@ -77,6 +77,7 @@ model Participante {
 
   @@index([evento_id])
   @@index([usuario_id])
+  @@unique([evento_id, usuario_id])
 }
 
 model Transaccion {

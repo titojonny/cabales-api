@@ -37,12 +37,16 @@ npm run dev
 
 ## Endpoints actuales
 
-| Método | Ruta          | Descripción                             | Body                                   |
-|--------|---------------|-----------------------------------------|----------------------------------------|
-| GET    | `/api/health` | Health check del servidor               | -                                      |
-| GET    | `/api/test-db`| Prueba de conexión con la base de datos | -                                      |
-| POST   | `/api/users`  | Crear un usuario                        | `{ "nombre": "...", "email": "..." }`  |
-| POST   | `/api/events` | Crear un evento anclado a un creador    | `{ "nombre": "...", "creador_id": "uuid" }` |
+| Método | Ruta                                  | Descripción                                   | Body                                   |
+|--------|---------------------------------------|-----------------------------------------------|----------------------------------------|
+| GET    | `/api/health`                         | Health check del servidor                     | -                                      |
+| GET    | `/api/test-db`                        | Prueba de conexión con la base de datos       | -                                      |
+| POST   | `/api/users`                          | Crear un usuario                              | `{ "nombre": "...", "email": "..." }`  |
+| POST   | `/api/events`                         | Crear un evento anclado a un creador          | `{ "nombre": "...", "creador_id": "uuid" }` |
+| POST   | `/api/events/:id/participants`        | Sentar a un comensal (usuario o fantasma)     | `{ "usuario_id": "uuid" }` o `{ "nombre_invitado": "..." }` (nunca ambos) |
+| POST   | `/api/events/:id/consumptions`        | Registrar consumo individual o compartido     | `{ "monto_centavos": 10000, "participante_ids": ["uuid"] }` |
+
+> **Dinero:** todos los montos viajan en **centavos enteros** (`monto_centavos`). Nunca decimales de dólar en la API.
 
 ## Flujo de prueba
 
@@ -64,9 +68,10 @@ src/
   app.ts                # Configuración de Express (middleware + rutas)
   config/prisma.ts      # Instancia única de PrismaClient
   routes/               # Definición de endpoints (health, usuarios, eventos)
-  middlewares/          # errorHandler (errores HTTP + mapeo de errores Prisma)
+  controllers/          # Lógica de negocio (participantes, consumos)
+  middlewares/          # errorHandler + validateBody (zod)
   validators/           # Schemas de zod para el req.body
-  utils/money.ts        # Utilidades de dinero en centavos
+  utils/money.ts        # Utilidades de dinero en centavos (reparto exacto)
 tests/                  # Tests con Vitest + Supertest
 ```
 
