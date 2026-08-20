@@ -30,7 +30,7 @@ npm run dev
 ## Reglas de negocio (¡No romper!)
 
 - **Dinero en centavos:** todos los montos se guardan como `Int` en centavos (`total_gastado_centavos`, `monto_consumido_centavos`, `monto_pagado_centavos`, `monto_centavos`). Nunca usar `Float` para dinero.
-- **Reparto exacto:** la suma de las partes siempre debe cuadrar con el total. Usa `repartirCentavosSobrantes()` en `src/utils/money.ts`.
+- **Reparto exacto:** la suma de las partes siempre debe cuadrar con el total. Usa `repartirCentavosExactos()` / `repartirCentavosSobrantes()` en `src/utils/money.ts` y `src/utils/settlement.ts`.
 - **Transacciones atómicas:** operaciones complejas (cerrar evento, pagos múltiples) usan `$transaction` de Prisma.
 - **Evento CERRADO = bloqueado:** prohibido agregar/editar/eliminar consumos o participantes.
 - **Envelope unificado:** toda respuesta es `{ success, message?, data?, error? }`. Errores en español.
@@ -47,6 +47,7 @@ npm run dev
 | GET    | `/api/events/:id`                     | Detalle del evento con sus comensales         | -                                      |
 | POST   | `/api/events/:id/participants`        | Sentar a un comensal (usuario o fantasma)     | `{ "usuario_id": "uuid" }` o `{ "nombre_invitado": "..." }` (nunca ambos) |
 | POST   | `/api/events/:id/consumptions`        | Registrar consumo individual o compartido     | `{ "monto_centavos": 10000, "participante_ids": ["uuid"] }` |
+| POST   | `/api/events/:id/close`               | Liquidar la mesa (flujo mínimo de efectivo)   | - |
 
 > **Dinero:** todos los montos viajan en **centavos enteros** (`monto_centavos`). Nunca decimales de dólar en la API.
 
@@ -70,10 +71,11 @@ src/
   app.ts                # Configuración de Express (middleware + rutas)
   config/prisma.ts      # Instancia única de PrismaClient
   routes/               # Definición de endpoints (health, usuarios, eventos)
-  controllers/          # Lógica de negocio (participantes, consumos)
+  controllers/          # Lógica de negocio (participantes, consumos, cierre)
   middlewares/          # errorHandler + validateBody (zod)
   validators/           # Schemas de zod para el req.body
   utils/money.ts        # Utilidades de dinero en centavos (reparto exacto)
+  utils/settlement.ts   # Balances y flujo mínimo de efectivo
 tests/                  # Tests con Vitest + Supertest
 ```
 

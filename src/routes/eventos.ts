@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { prisma } from '../config/prisma.js';
+import { cerrarEvento } from '../controllers/cierre.js';
 import { obtenerEventoDetalle } from '../controllers/eventos.js';
 import { registrarConsumo } from '../controllers/consumos.js';
 import { agregarParticipante } from '../controllers/participantes.js';
@@ -50,5 +51,8 @@ router.post('/events/:id/participants', validateBody(agregarParticipanteSchema),
 
 // Registrar un consumo individual o compartido en centavos
 router.post('/events/:id/consumptions', validateBody(crearConsumoSchema), registrarConsumo);
+
+// Liquidar la mesa — motor de flujo mínimo de efectivo
+router.post('/events/:id/close', cerrarEvento);
 
 export default router;
