@@ -1,0 +1,15 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+# Configuración local de herramientas de IA (skills de opencode/claude/windsurf)
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+
+# Base de datos local SQLite (cada quien genera la suya con prisma migrate)
+dev.db
+dev.db-journal
+
+/generated/prisma

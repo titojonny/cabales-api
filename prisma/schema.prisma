@@ -1,0 +1,85 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// --- 1. MODELOS PRINCIPALES ---
+
+model Usuario {
+  id             String   @id @default(uuid())
+  nombre         String
+  email          String   @unique
+  avatar_url     String?
+  fecha_registro DateTime @default(now())
+
+  // Relaciones
+  eventos_creados Evento[]
+  participaciones Participante[]
+}
+
+model Evento {
+  id            String   @id @default(uuid())
+  creador_id    String
+  nombre        String   // Ej. "Cena en La Cumbre"
+  fecha         DateTime @default(now())
+  
+  // Estados esperados: "ACTIVO", "CERRADO"
+  estado        String   @default("ACTIVO") 
+  
+  total_gastado Float    @default(0.00) 
+
+  // Relaciones
+  creador       Usuario        @relation(fields: [creador_id], references: [id])
+  participantes Participante[]
+  transacciones Transaccion[]
+}
+
+model Participante {
+  id              String  @id @default(uuid())
+  evento_id       String
+  
+  // Magia de Usuarios Fantasma:
+  // Si tiene la app, guardas el usuario_id. Si no, guardas el nombre_invitado.
+  usuario_id      String? 
+  nombre_invitado String? 
+
+  monto_consumido Float   @default(0.00)
+  monto_pagado    Float   @default(0.00)
+
+  // Relaciones
+  evento          Evento   @relation(fields: [evento_id], references: [id])
+  usuario         Usuario? @relation(fields: [usuario_id], references: [id])
+
+  // Relaciones Nombradas
+  deudas_a_pagar  Transaccion[] @relation("DeudorRelacion")
+  deudas_a_cobrar Transaccion[] @relation("AcreedorRelacion")
+}
+
+model Transaccion {
+  id              String    @id @default(uuid())
+  evento_id       String
+  deudor_id       String
+  acreedor_id     String
+  
+  monto           Float
+  
+  // Estados esperados: "PENDIENTE", "EN_REVISION", "EN_DISPUTA", "COMPLETADO"
+  estado          String    @default("PENDIENTE")
+  
+  comprobante_url String?   // Link a la foto de la transferencia
+  fecha_limite    DateTime? // Temporizador de auto-aprobación
+
+  // Auditoría
+  creado_en       DateTime  @default(now())
+  actualizado_en  DateTime  @updatedAt
+
+  // Relaciones
+  evento          Evento       @relation(fields: [evento_id], references: [id])
+  deudor          Participante @relation("DeudorRelacion", fields: [deudor_id], references: [id])
+  acreedor        Participante @relation("AcreedorRelacion", fields: [acreedor_id], references: [id])
+}
