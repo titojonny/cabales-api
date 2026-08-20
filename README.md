@@ -47,6 +47,7 @@ npm run dev
 | GET    | `/api/events/:id`                     | Detalle del evento con sus comensales         | -                                      |
 | POST   | `/api/events/:id/participants`        | Sentar a un comensal (usuario o fantasma)     | `{ "usuario_id": "uuid" }` o `{ "nombre_invitado": "..." }` (nunca ambos) |
 | POST   | `/api/events/:id/consumptions`        | Registrar consumo individual o compartido     | `{ "monto_centavos": 10000, "participante_ids": ["uuid"] }` |
+| POST   | `/api/events/:id/payments`            | Registrar pago de un comensal (acumula)       | `{ "participante_id": "uuid", "monto_centavos": 5000 }` |
 | POST   | `/api/events/:id/close`               | Liquidar la mesa (flujo mínimo de efectivo)   | - |
 
 > **Dinero:** todos los montos viajan en **centavos enteros** (`monto_centavos`). Nunca decimales de dólar en la API.
@@ -55,6 +56,8 @@ npm run dev
 
 1. `POST /api/users` con `{ "nombre": "Jonathan", "email": "jonathan@ufg.edu.sv" }` → devuelve el `id` (UUID).
 2. `POST /api/events` con `{ "nombre": "Cena por el proyecto", "creador_id": "<id del paso 1>" }` → evento creado.
+3. `POST /api/events/:id/participants` + `POST /api/events/:id/consumptions` + `POST /api/events/:id/payments` → arma la mesa sin tocar SQL.
+4. `POST /api/events/:id/close` → liquida con el mínimo de transferencias.
 
 ## Tests
 
@@ -71,7 +74,7 @@ src/
   app.ts                # Configuración de Express (middleware + rutas)
   config/prisma.ts      # Instancia única de PrismaClient
   routes/               # Definición de endpoints (health, usuarios, eventos)
-  controllers/          # Lógica de negocio (participantes, consumos, cierre)
+  controllers/          # Lógica de negocio (participantes, consumos, pagos, cierre)
   middlewares/          # errorHandler + validateBody (zod)
   validators/           # Schemas de zod para el req.body
   utils/money.ts        # Utilidades de dinero en centavos (reparto exacto)
