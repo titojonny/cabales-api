@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { prisma } from '../config/prisma.js';
+import { obtenerEventoDetalle } from '../controllers/eventos.js';
 import { registrarConsumo } from '../controllers/consumos.js';
 import { agregarParticipante } from '../controllers/participantes.js';
 import { HttpError } from '../middlewares/errorHandler.js';
@@ -40,6 +41,9 @@ router.post('/events', async (req: Request, res: Response, next: NextFunction): 
     next(error);
   }
 });
+
+// Detalle de un evento (radiografía de la mesa)
+router.get('/events/:id', obtenerEventoDetalle);
 
 // Agregar un comensal a la mesa (usuario registrado o invitado fantasma)
 router.post('/events/:id/participants', validateBody(agregarParticipanteSchema), agregarParticipante);

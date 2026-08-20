@@ -42,7 +42,9 @@ npm run dev
 | GET    | `/api/health`                         | Health check del servidor                     | -                                      |
 | GET    | `/api/test-db`                        | Prueba de conexión con la base de datos       | -                                      |
 | POST   | `/api/users`                          | Crear un usuario                              | `{ "nombre": "...", "email": "..." }`  |
+| GET    | `/api/users/:id/events`               | Dashboard: eventos como creador o invitado    | -                                      |
 | POST   | `/api/events`                         | Crear un evento anclado a un creador          | `{ "nombre": "...", "creador_id": "uuid" }` |
+| GET    | `/api/events/:id`                     | Detalle del evento con sus comensales         | -                                      |
 | POST   | `/api/events/:id/participants`        | Sentar a un comensal (usuario o fantasma)     | `{ "usuario_id": "uuid" }` o `{ "nombre_invitado": "..." }` (nunca ambos) |
 | POST   | `/api/events/:id/consumptions`        | Registrar consumo individual o compartido     | `{ "monto_centavos": 10000, "participante_ids": ["uuid"] }` |
 

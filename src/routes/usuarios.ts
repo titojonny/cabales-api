@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { prisma } from '../config/prisma.js';
+import { obtenerEventosDeUsuario } from '../controllers/usuarios.js';
 import { crearUsuarioSchema } from '../validators/schemas.js';
 
 const router = Router();
@@ -28,5 +29,8 @@ router.post('/users', async (req: Request, res: Response, next: NextFunction): P
     next(error);
   }
 });
+
+// Dashboard: eventos donde el usuario es creador o participante
+router.get('/users/:id/events', obtenerEventosDeUsuario);
 
 export default router;
