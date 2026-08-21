@@ -1,39 +1,65 @@
 {
   "name": "cabales-api",
   "version": "1.0.0",
-  "description": "API para dividir gastos de salidas grupales — Cabales",
+  "description": "API modular para gastos compartidos de Cabales",
   "main": "dist/index.js",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "postinstall": "prisma generate",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy"
+    "db:push": "prisma db push",
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma db push --force-reset && prisma db seed"
   },
-  "keywords": ["cabales", "gastos", "split", "bills", "friends"],
+  "keywords": [
+    "cabales",
+    "gastos",
+    "split",
+    "bills",
+    "friends"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@prisma/adapter-better-sqlite3": "^7.9.1",
+    "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "argon2": "^0.44.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.2",
     "helmet": "^8.3.0",
+    "pino": "^9.9.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.2.0",
     "@types/supertest": "^7.2.1",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.3.0",
+    "prettier": "^3.6.2",
     "prisma": "^7.9.1",
     "supertest": "^7.2.2",
     "tsx": "^4.23.12",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.41.0",
     "vitest": "^4.1.11"
   }
 }

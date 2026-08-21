@@ -3,8 +3,6 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "rootDir": "./src",
-    "outDir": "./dist",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -14,14 +12,10 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "sourceMap": true,
-    "declaration": true,
-    "declarationMap": true,
     "moduleDetection": "force",
     "noUncheckedSideEffectImports": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "noUncheckedSideEffectImports": true
+    "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests", "prisma.config.ts"]
+  "include": ["src/**/*", "tests/**/*", "prisma.config.ts", "eslint.config.js"],
+  "exclude": ["node_modules", "dist"]
 }

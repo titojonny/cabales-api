@@ -1,108 +1,689 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
-// --- ENUMS DE ESTADO ---
-
-enum EstadoEvento {
-  ACTIVO
-  CERRADO
+enum AccountProvider {
+  PASSWORD
 }
 
-enum EstadoTransaccion {
-  PENDIENTE
-  EN_REVISION
-  EN_DISPUTA
-  COMPLETADO
+enum GroupRole {
+  OWNER
+  ADMIN
+  MEMBER
 }
 
-// --- 1. MODELOS PRINCIPALES ---
-// REGLA DE ORO DEL DINERO: todos los montos se guardan en CENTAVOS (Int).
-// Nunca usar Float para dinero: evita errores de precisión y hace trivial
-// el redondeo a 2 decimales y el reparto de centavos sobrantes.
-
-model Usuario {
-  id             String   @id @default(uuid())
-  nombre         String
-  email          String   @unique
-  avatar_url     String?
-  fecha_registro DateTime @default(now())
-
-  // Relaciones
-  eventos_creados Evento[]
-  participaciones Participante[]
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
 }
 
-model Evento {
-  id                     String       @id @default(uuid())
-  creador_id             String
-  nombre                 String // Ej. "Cena en La Cumbre"
-  fecha                  DateTime     @default(now())
-  estado                 EstadoEvento @default(ACTIVO)
-  total_gastado_centavos Int          @default(0)
-
-  // Relaciones
-  creador       Usuario        @relation(fields: [creador_id], references: [id])
-  participantes Participante[]
-  transacciones Transaccion[]
-
-  @@index([creador_id])
+enum EventStatus {
+  OPEN
+  CLOSED
+  CANCELLED
 }
 
-model Participante {
-  id        String @id @default(uuid())
-  evento_id String
-
-  // Magia de Usuarios Fantasma:
-  // Si tiene la app, guardas el usuario_id. Si no, guardas el nombre_invitado.
-  usuario_id      String?
-  nombre_invitado String?
-
-  monto_consumido_centavos Int @default(0)
-  monto_pagado_centavos    Int @default(0)
-
-  // Relaciones
-  evento  Evento   @relation(fields: [evento_id], references: [id])
-  usuario Usuario? @relation(fields: [usuario_id], references: [id])
-
-  // Relaciones Nombradas
-  deudas_a_pagar  Transaccion[] @relation("DeudorRelacion")
-  deudas_a_cobrar Transaccion[] @relation("AcreedorRelacion")
-
-  @@index([evento_id])
-  @@index([usuario_id])
-  @@unique([evento_id, usuario_id])
+enum SplitMode {
+  EQUAL
+  EXACT
 }
 
-model Transaccion {
-  id          String @id @default(uuid())
-  evento_id   String
-  deudor_id   String
-  acreedor_id String
-
-  monto_centavos Int
-
-  estado EstadoTransaccion @default(PENDIENTE)
-
-  comprobante_url String? // Link a la foto de la transferencia
-  fecha_limite    DateTime? // Temporizador de auto-aprobación
-
-  // Auditoría
-  creado_en      DateTime @default(now())
-  actualizado_en DateTime @updatedAt
-
-  // Relaciones
-  evento   Evento       @relation(fields: [evento_id], references: [id])
-  deudor   Participante @relation("DeudorRelacion", fields: [deudor_id], references: [id])
-  acreedor Participante @relation("AcreedorRelacion", fields: [acreedor_id], references: [id])
-
-  @@index([evento_id])
-  @@index([deudor_id])
-  @@index([acreedor_id])
+enum OcrJobStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
 }
+
+enum SettlementStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+enum TransferStatus {
+  PENDING
+  PAID
+  DISPUTED
+  CANCELLED
+}
+
+enum FundRole {
+  MANAGER
+  MEMBER
+}
+
+enum FundMovementType {
+  CONTRIBUTION
+  WITHDRAWAL
+  ADJUSTMENT
+}
+
+enum BudgetPeriod {
+  WEEKLY
+  MONTHLY
+  YEARLY
+  CUSTOM
+}
+
+enum RecurringFrequency {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum DocumentAccessLevel {
+  VIEW
+  EDIT
+  MANAGE
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+/// Identidad principal; los totales y estadísticas se calculan desde gastos y liquidaciones.
+model User {
+  id                   String                  @id @default(uuid()) @db.Uuid
+  email                String                  @unique @db.VarChar(320)
+  displayName          String                  @db.VarChar(120)
+  avatarUrl            String?                 @db.VarChar(2048)
+  locale               String                  @default("es") @db.VarChar(10)
+  isActive             Boolean                 @default(true)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  accounts             Account[]
+  sessions             Session[]
+  groupMemberships     GroupMember[]
+  sentInvitations      GroupInvitation[]       @relation("InvitationSender")
+  acceptedInvitations  GroupInvitation[]       @relation("InvitationAcceptor")
+  createdGroups        Group[]                 @relation("GroupCreator")
+  createdEvents        Event[]                 @relation("EventCreator")
+  createdExpenses      Expense[]               @relation("ExpenseCreator")
+  createdSettlements   Settlement[]            @relation("SettlementCreator")
+  paidTransfers        SettlementTransfer[]    @relation("TransferMarker")
+  createdFunds         Fund[]                  @relation("FundCreator")
+  createdFundMovements FundMovement[]          @relation("FundMovementCreator")
+  transferChanges      TransferStatusHistory[] @relation("TransferStatusChanger")
+  documents            Document[]              @relation("DocumentOwner")
+  documentGrants       DocumentAccessGrant[]
+  documentLogs         DocumentAccessLog[]
+  pushSubscriptions    PushSubscription[]
+  notifications        Notification[]
+  achievements         UserAchievement[]
+  idempotencyKeys      IdempotencyKey[]
+  auditLogs            AuditLog[]
+}
+
+/// Credencial desacoplada para permitir otros proveedores sin contaminar User.
+model Account {
+  id                String          @id @default(uuid()) @db.Uuid
+  userId            String          @db.Uuid
+  provider          AccountProvider
+  providerAccountId String          @db.VarChar(320)
+  passwordHash      String?         @db.VarChar(512)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+/// Sesión opaca revocable; solo persiste hashes de token y CSRF.
+model Session {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @db.Uuid
+  tokenHash     String    @unique @db.Char(64)
+  csrfTokenHash String    @db.Char(64)
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  lastSeenAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  userAgent     String?   @db.VarChar(512)
+  ipAddress     String?   @db.VarChar(64)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+/// Espacio de colaboración y frontera principal de autorización.
+model Group {
+  id          String             @id @default(uuid()) @db.Uuid
+  name        String             @db.VarChar(120)
+  description String?            @db.VarChar(500)
+  currency    String             @default("USD") @db.Char(3)
+  createdById String             @db.Uuid
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  createdBy   User               @relation("GroupCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members     GroupMember[]
+  invitations GroupInvitation[]
+  events      Event[]
+  expenses    Expense[]
+  settlements Settlement[]
+  funds       Fund[]
+  categories  Category[]
+  tags        Tag[]
+  budgets     Budget[]
+  recurring   RecurringExpense[]
+  documents   Document[]
+
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model GroupMember {
+  id                  String               @id @default(uuid()) @db.Uuid
+  groupId             String               @db.Uuid
+  userId              String               @db.Uuid
+  role                GroupRole            @default(MEMBER)
+  joinedAt            DateTime             @default(now())
+  group               Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventParticipations EventParticipant[]
+  fundMemberships     FundMember[]
+  expenseParticipants ExpenseParticipant[]
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@index([groupId, role])
+}
+
+model GroupInvitation {
+  id           String           @id @default(uuid()) @db.Uuid
+  groupId      String           @db.Uuid
+  invitedById  String           @db.Uuid
+  email        String           @db.VarChar(320)
+  role         GroupRole        @default(MEMBER)
+  tokenHash    String           @unique @db.Char(64)
+  status       InvitationStatus @default(PENDING)
+  expiresAt    DateTime
+  acceptedById String?          @db.Uuid
+  acceptedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  group        Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  invitedBy    User             @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
+  acceptedBy   User?            @relation("InvitationAcceptor", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@index([groupId, status])
+  @@index([invitedById])
+  @@index([email, status])
+  @@index([expiresAt])
+}
+
+model Event {
+  id           String             @id @default(uuid()) @db.Uuid
+  groupId      String             @db.Uuid
+  name         String             @db.VarChar(160)
+  description  String?            @db.VarChar(1000)
+  startsAt     DateTime
+  status       EventStatus        @default(OPEN)
+  createdById  String             @db.Uuid
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  group        Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy    User               @relation("EventCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  participants EventParticipant[]
+  links        EventLink[]
+  expenses     Expense[]
+  settlement   Settlement?
+
+  @@index([groupId, startsAt])
+  @@index([groupId, status])
+  @@index([createdById])
+}
+
+/// Participante canónico del evento: miembro registrado XOR invitado por nombre.
+model EventParticipant {
+  id                    String               @id @default(uuid()) @db.Uuid
+  eventId               String               @db.Uuid
+  groupMemberId         String?              @db.Uuid
+  guestName             String?              @db.VarChar(120)
+  createdAt             DateTime             @default(now())
+  event                 Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  groupMember           GroupMember?         @relation(fields: [groupMemberId], references: [id], onDelete: Restrict)
+  expenseParticipations ExpenseParticipant[]
+  outgoingTransfers     SettlementTransfer[] @relation("TransferDebtor")
+  incomingTransfers     SettlementTransfer[] @relation("TransferCreditor")
+
+  @@unique([eventId, groupMemberId])
+  @@index([eventId])
+  @@index([groupMemberId])
+}
+
+model EventLink {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String   @db.Uuid
+  label     String   @db.VarChar(80)
+  url       String   @db.VarChar(2048)
+  createdAt DateTime @default(now())
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+}
+
+/// Gasto inmutable en centavos una vez incluido en una liquidación.
+model Expense {
+  id           String               @id @default(uuid()) @db.Uuid
+  groupId      String               @db.Uuid
+  eventId      String               @db.Uuid
+  title        String               @db.VarChar(160)
+  notes        String?              @db.VarChar(1000)
+  totalCents   Int
+  currency     String               @db.Char(3)
+  splitMode    SplitMode
+  occurredAt   DateTime
+  createdById  String               @db.Uuid
+  categoryId   String?              @db.Uuid
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  group        Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event        Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdBy    User                 @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  category     Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  participants ExpenseParticipant[]
+  payers       ExpensePayer[]
+  items        ExpenseItem[]
+  receipts     Receipt[]
+  tags         ExpenseTag[]
+
+  @@index([groupId, occurredAt])
+  @@index([eventId, occurredAt])
+  @@index([createdById])
+  @@index([categoryId])
+}
+
+/// Parte exacta de un participante; el servicio exige shareCents > 0 y suma igual al gasto.
+model ExpenseParticipant {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  expenseId          String                  @db.Uuid
+  eventParticipantId String                  @db.Uuid
+  /// Copia consultable de EventParticipant.groupMemberId, fijada por el repositorio al crear el gasto.
+  groupMemberId      String?                 @db.Uuid
+  shareCents         Int
+  expense            Expense                 @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  eventParticipant   EventParticipant        @relation(fields: [eventParticipantId], references: [id], onDelete: Restrict)
+  groupMember        GroupMember?            @relation(fields: [groupMemberId], references: [id], onDelete: Restrict)
+  payer              ExpensePayer?
+  allocations        ExpenseItemAllocation[]
+
+  @@unique([expenseId, eventParticipantId])
+  @@index([eventParticipantId])
+  @@index([groupMemberId])
+}
+
+/// Aporte pagado; el servicio exige amountCents > 0 y suma igual al total del gasto.
+model ExpensePayer {
+  id                   String             @id @default(uuid()) @db.Uuid
+  expenseId            String             @db.Uuid
+  expenseParticipantId String             @unique @db.Uuid
+  amountCents          Int
+  expense              Expense            @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  expenseParticipant   ExpenseParticipant @relation(fields: [expenseParticipantId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId])
+}
+
+model ExpenseItem {
+  id          String                  @id @default(uuid()) @db.Uuid
+  expenseId   String                  @db.Uuid
+  name        String                  @db.VarChar(160)
+  amountCents Int
+  quantity    Int                     @default(1)
+  expense     Expense                 @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  allocations ExpenseItemAllocation[]
+
+  @@index([expenseId])
+}
+
+/// Asignación por ítem; cada ítem y el agregado por participante deben cuadrar exactamente.
+model ExpenseItemAllocation {
+  id                   String             @id @default(uuid()) @db.Uuid
+  expenseItemId        String             @db.Uuid
+  expenseParticipantId String             @db.Uuid
+  amountCents          Int
+  expenseItem          ExpenseItem        @relation(fields: [expenseItemId], references: [id], onDelete: Cascade)
+  expenseParticipant   ExpenseParticipant @relation(fields: [expenseParticipantId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseItemId, expenseParticipantId])
+  @@index([expenseParticipantId])
+}
+
+model Receipt {
+  id         String   @id @default(uuid()) @db.Uuid
+  expenseId  String   @db.Uuid
+  storageKey String   @unique @db.VarChar(512)
+  mimeType   String   @db.VarChar(100)
+  createdAt  DateTime @default(now())
+  expense    Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  ocrJobs    OcrJob[]
+
+  @@index([expenseId])
+}
+
+model OcrJob {
+  id            String       @id @default(uuid()) @db.Uuid
+  receiptId     String       @db.Uuid
+  status        OcrJobStatus @default(PENDING)
+  extractedData Json?
+  errorCode     String?      @db.VarChar(80)
+  attempts      Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  receipt       Receipt      @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([receiptId, status])
+  @@index([status, createdAt])
+}
+
+/// Cierre único por evento calculado desde gastos; no duplica balances derivados.
+model Settlement {
+  id          String               @id @default(uuid()) @db.Uuid
+  groupId     String               @db.Uuid
+  eventId     String               @unique @db.Uuid
+  status      SettlementStatus     @default(OPEN)
+  currency    String               @db.Char(3)
+  createdById String               @db.Uuid
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  completedAt DateTime?
+  group       Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event       Event                @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  createdBy   User                 @relation("SettlementCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  transfers   SettlementTransfer[]
+
+  @@index([groupId, createdAt])
+  @@index([createdById])
+}
+
+model SettlementTransfer {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  settlementId          String                  @db.Uuid
+  debtorParticipantId   String                  @db.Uuid
+  creditorParticipantId String                  @db.Uuid
+  amountCents           Int
+  status                TransferStatus          @default(PENDING)
+  paidAt                DateTime?
+  markedPaidById        String?                 @db.Uuid
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  settlement            Settlement              @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  debtor                EventParticipant        @relation("TransferDebtor", fields: [debtorParticipantId], references: [id], onDelete: Restrict)
+  creditor              EventParticipant        @relation("TransferCreditor", fields: [creditorParticipantId], references: [id], onDelete: Restrict)
+  markedPaidBy          User?                   @relation("TransferMarker", fields: [markedPaidById], references: [id], onDelete: SetNull)
+  history               TransferStatusHistory[]
+
+  @@unique([settlementId, debtorParticipantId, creditorParticipantId])
+  @@index([settlementId, status])
+  @@index([debtorParticipantId])
+  @@index([creditorParticipantId])
+}
+
+model TransferStatusHistory {
+  id          String             @id @default(uuid()) @db.Uuid
+  transferId  String             @db.Uuid
+  fromStatus  TransferStatus?
+  toStatus    TransferStatus
+  /// Actor real de la transición; SetNull preserva el historial si se elimina el usuario.
+  changedById String?            @db.Uuid
+  reason      String?            @db.VarChar(500)
+  createdAt   DateTime           @default(now())
+  transfer    SettlementTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  changedBy   User?              @relation("TransferStatusChanger", fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([transferId, createdAt])
+  @@index([changedById])
+}
+
+model Fund {
+  id          String         @id @default(uuid()) @db.Uuid
+  groupId     String         @db.Uuid
+  name        String         @db.VarChar(120)
+  currency    String         @db.Char(3)
+  createdById String         @db.Uuid
+  createdAt   DateTime       @default(now())
+  group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy   User           @relation("FundCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members     FundMember[]
+  movements   FundMovement[]
+
+  @@unique([groupId, name])
+  @@index([createdById])
+}
+
+model FundMember {
+  id            String      @id @default(uuid()) @db.Uuid
+  fundId        String      @db.Uuid
+  groupMemberId String      @db.Uuid
+  role          FundRole    @default(MEMBER)
+  joinedAt      DateTime    @default(now())
+  fund          Fund        @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  groupMember   GroupMember @relation(fields: [groupMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([fundId, groupMemberId])
+}
+
+/// Movimiento firmado: positivo ingresa fondos y negativo los retira; saldo siempre derivado.
+model FundMovement {
+  id          String           @id @default(uuid()) @db.Uuid
+  fundId      String           @db.Uuid
+  type        FundMovementType
+  amountCents Int
+  description String?          @db.VarChar(500)
+  createdById String           @db.Uuid
+  createdAt   DateTime         @default(now())
+  fund        Fund             @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  createdBy   User             @relation("FundMovementCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([fundId, createdAt])
+  @@index([createdById])
+}
+
+model Category {
+  id       String    @id @default(uuid()) @db.Uuid
+  groupId  String?   @db.Uuid
+  name     String    @db.VarChar(80)
+  color    String?   @db.VarChar(20)
+  group    Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  expenses Expense[]
+  budgets  Budget[]
+
+  @@unique([groupId, name])
+  @@index([groupId])
+}
+
+model Tag {
+  id       String       @id @default(uuid()) @db.Uuid
+  groupId  String       @db.Uuid
+  name     String       @db.VarChar(50)
+  group    Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  expenses ExpenseTag[]
+
+  @@unique([groupId, name])
+}
+
+model ExpenseTag {
+  expenseId String  @db.Uuid
+  tagId     String  @db.Uuid
+  expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([expenseId, tagId])
+  @@index([tagId])
+}
+
+/// Límite configurado; consumo del presupuesto se deriva de Expense.
+model Budget {
+  id          String       @id @default(uuid()) @db.Uuid
+  groupId     String       @db.Uuid
+  categoryId  String?      @db.Uuid
+  name        String       @db.VarChar(120)
+  amountCents Int
+  currency    String       @db.Char(3)
+  period      BudgetPeriod
+  startsAt    DateTime
+  endsAt      DateTime?
+  createdAt   DateTime     @default(now())
+  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([groupId, startsAt])
+  @@index([categoryId])
+}
+
+model RecurringExpense {
+  id          String             @id @default(uuid()) @db.Uuid
+  groupId     String             @db.Uuid
+  title       String             @db.VarChar(160)
+  amountCents Int
+  currency    String             @db.Char(3)
+  frequency   RecurringFrequency
+  nextRunAt   DateTime
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  group       Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, isActive])
+  @@index([nextRunAt, isActive])
+}
+
+model Document {
+  id         String                @id @default(uuid()) @db.Uuid
+  groupId    String?               @db.Uuid
+  ownerId    String                @db.Uuid
+  name       String                @db.VarChar(255)
+  storageKey String                @unique @db.VarChar(512)
+  mimeType   String                @db.VarChar(100)
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  group      Group?                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  owner      User                  @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  grants     DocumentAccessGrant[]
+  logs       DocumentAccessLog[]
+
+  @@index([groupId])
+  @@index([ownerId])
+}
+
+model DocumentAccessGrant {
+  id         String              @id @default(uuid()) @db.Uuid
+  documentId String              @db.Uuid
+  userId     String              @db.Uuid
+  access     DocumentAccessLevel
+  createdAt  DateTime            @default(now())
+  document   Document            @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([userId])
+}
+
+model DocumentAccessLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  documentId String   @db.Uuid
+  userId     String?  @db.Uuid
+  action     String   @db.VarChar(80)
+  requestId  String   @db.VarChar(100)
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([documentId, createdAt])
+  @@index([userId])
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  endpoint  String   @unique @db.Text
+  p256dh    String   @db.VarChar(512)
+  auth      String   @db.VarChar(512)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Notification {
+  id        String             @id @default(uuid()) @db.Uuid
+  userId    String             @db.Uuid
+  type      String             @db.VarChar(80)
+  title     String             @db.VarChar(160)
+  body      String             @db.VarChar(1000)
+  data      Json?
+  status    NotificationStatus @default(UNREAD)
+  createdAt DateTime           @default(now())
+  readAt    DateTime?
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, createdAt])
+}
+
+model Achievement {
+  id          String            @id @default(uuid()) @db.Uuid
+  code        String            @unique @db.VarChar(80)
+  name        String            @db.VarChar(120)
+  description String            @db.VarChar(500)
+  users       UserAchievement[]
+}
+
+model UserAchievement {
+  userId        String      @db.Uuid
+  achievementId String      @db.Uuid
+  awardedAt     DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@id([userId, achievementId])
+  @@index([achievementId])
+}
+
+/// Resultado serializado de una mutación financiera, único por actor, alcance y llave.
+model IdempotencyKey {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  scope          String   @db.VarChar(120)
+  key            String   @db.VarChar(128)
+  requestHash    String   @db.Char(64)
+  responseStatus Int
+  responseBody   Json
+  resourceId     String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  /// Tras este instante el repositorio elimina y reclama atómicamente la misma clave única.
+  expiresAt      DateTime
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scope, key])
+  @@index([expiresAt])
+}
+
+/// Auditoría sin secretos ni cuerpos crudos; requestId permite correlación operacional.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @db.Uuid
+  action     String   @db.VarChar(120)
+  entityType String   @db.VarChar(80)
+  entityId   String?  @db.Uuid
+  requestId  String   @db.VarChar(100)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@index([requestId])
+}
+
+// Prisma no emite CHECK: los servicios MVP verifican participantes, enteros positivos,
+// moneda ISO, sumas exactas y transiciones implementadas. Los modelos futuros deberán
+// incorporar sus validaciones de negocio antes de exponerse mediante servicios.

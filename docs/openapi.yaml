@@ -1,0 +1,1130 @@
+# Contrato HTTP implementado por Cabales API v1. Los nombres de cookie muestran sus valores predeterminados configurables.
+openapi: 3.1.0
+info:
+  title: Cabales API
+  version: 1.1.0
+  license: { name: ISC, identifier: ISC }
+  description: >-
+    API de autenticación, grupos, eventos, gastos exactos y liquidaciones en centavos.
+    Todas las respuestas /api/v1 usan Cache-Control private, no-store; health y ready usan no-store.
+servers:
+  - url: /
+tags:
+  - name: Health
+    description: Estado del proceso y sus dependencias.
+  - name: Auth
+    description: Registro, sesión y recuperación CSRF.
+  - name: Groups
+    description: Grupos, membresías e invitaciones.
+  - name: Events
+    description: Eventos y participantes canónicos.
+  - name: Expenses
+    description: Gastos manuales y reparto exacto.
+  - name: Settlements
+    description: Cierres y transferencias.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Comprueba el proceso sin consultar PostgreSQL
+      operationId: getHealth
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/HealthSuccess' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /ready:
+    get:
+      tags: [Health]
+      summary: Comprueba conectividad con PostgreSQL
+      operationId: getReady
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/HealthSuccess' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Registra un usuario y emite sesión y CSRF
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterInput' }
+      responses:
+        '201': { $ref: '#/components/responses/AuthSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Inicia una sesión opaca revocable
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginInput' }
+      responses:
+        '200': { $ref: '#/components/responses/AuthSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoca la sesión actual
+      operationId: logout
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Recupera identidad y CSRF validado desde su cookie
+      operationId: getMe
+      security: [{ sessionCookie: [], csrfCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/AuthSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups:
+    get:
+      tags: [Groups]
+      summary: Lista los grupos del actor
+      operationId: listGroups
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/GroupListSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Groups]
+      summary: Crea grupo y membresía OWNER
+      operationId: createGroup
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupInput' }
+      responses:
+        '201': { $ref: '#/components/responses/GroupSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Groups]
+      summary: Obtiene grupo y miembros
+      operationId: getGroup
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/GroupDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    patch:
+      tags: [Groups]
+      summary: Actualiza grupo como OWNER o ADMIN
+      operationId: updateGroup
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupPatch' }
+      responses:
+        '200': { $ref: '#/components/responses/GroupSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Groups]
+      summary: Elimina un grupo vacío como OWNER
+      operationId: deleteGroup
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/invitations:
+    post:
+      tags: [Groups]
+      summary: Crea una invitación y devuelve su token una sola vez
+      operationId: createInvitation
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationInput' }
+      responses:
+        '201': { $ref: '#/components/responses/InvitationSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/invitations/accept:
+    post:
+      tags: [Groups]
+      summary: Acepta una invitación ligada al correo autenticado
+      operationId: acceptInvitation
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInvitationInput' }
+      responses:
+        '200': { $ref: '#/components/responses/MembershipSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '410': { $ref: '#/components/responses/Gone' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/events:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Events]
+      summary: Lista eventos del grupo
+      operationId: listEvents
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/EventListSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Events]
+      summary: Crea evento y padrón de participantes
+      operationId: createEvent
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EventInput' }
+      responses:
+        '201': { $ref: '#/components/responses/EventSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/events/{eventId}:
+    get:
+      tags: [Events]
+      summary: Obtiene evento, padrón, links y cierre
+      operationId: getEvent
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/EventId'
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/EventDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/expenses:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Expenses]
+      summary: Lista gastos del grupo
+      operationId: listExpenses
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/ExpenseListSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Expenses]
+      summary: Crea un gasto manual exacto
+      operationId: createExpense
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExpenseInput' }
+      responses:
+        '200': { $ref: '#/components/responses/ExpenseDetailSuccess' }
+        '201': { $ref: '#/components/responses/ExpenseDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/expenses/{expenseId}:
+    get:
+      tags: [Expenses]
+      summary: Obtiene partes, pagadores, ítems y asignaciones
+      operationId: getExpense
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/ExpenseId'
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/ExpenseDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/settlements:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Settlements]
+      summary: Lista liquidaciones
+      operationId: listSettlements
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/SettlementListSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Settlements]
+      summary: Cierra un evento y crea transferencias
+      operationId: createSettlement
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettlementInput' }
+      responses:
+        '200': { $ref: '#/components/responses/SettlementDetailSuccess' }
+        '201': { $ref: '#/components/responses/SettlementDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/settlements/{settlementId}:
+    get:
+      tags: [Settlements]
+      summary: Obtiene liquidación, transferencias e historial
+      operationId: getSettlement
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/SettlementId'
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/SettlementDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/settlements/{settlementId}/transfers/{transferId}/paid:
+    patch:
+      tags: [Settlements]
+      summary: Marca una transferencia como pagada
+      operationId: markTransferPaid
+      description: El deudor o un administrador puede repetir PAID; la operación devuelve el estado actual y converge el cierre.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/SettlementId'
+        - $ref: '#/components/parameters/TransferId'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/TransferSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: cabales_session
+      description: Nombre predeterminado configurable mediante COOKIE_NAME.
+    csrfCookie:
+      type: apiKey
+      in: cookie
+      name: cabales_session_csrf
+      description: Cookie de doble envío cuyo prefijo sigue COOKIE_NAME; /auth/me valida su hash antes de devolverla.
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Debe coincidir con csrfCookie y con el hash ligado a la sesión.
+  parameters:
+    GroupId: { name: groupId, in: path, required: true, schema: { type: string, format: uuid } }
+    EventId: { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+    ExpenseId: { name: expenseId, in: path, required: true, schema: { type: string, format: uuid } }
+    SettlementId:
+      { name: settlementId, in: path, required: true, schema: { type: string, format: uuid } }
+    TransferId:
+      { name: transferId, in: path, required: true, schema: { type: string, format: uuid } }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Se reproduce durante 24 horas; una llave vencida puede reclamarse de nuevo atómicamente.
+      schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[!-~]+$' }
+  responses:
+    HealthSuccess:
+      {
+        description: Estado actual,
+        content: { application/json: { schema: { $ref: '#/components/schemas/HealthEnvelope' } } },
+      }
+    AuthSuccess:
+      description: Identidad y CSRF
+      headers:
+        Cache-Control: { schema: { type: string, const: 'private, no-store' } }
+        Set-Cookie:
+          description: Register/login emiten sesión HttpOnly y CSRF legible; /me no rota cookies.
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AuthEnvelope' }
+    MutationSuccess:
+      {
+        description: Mutación completada,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/MutationEnvelope' } } },
+      }
+    GroupSuccess:
+      {
+        description: Grupo,
+        content: { application/json: { schema: { $ref: '#/components/schemas/GroupEnvelope' } } },
+      }
+    GroupListSuccess:
+      {
+        description: Grupos,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/GroupListEnvelope' } } },
+      }
+    GroupDetailSuccess:
+      {
+        description: Grupo y miembros,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/GroupDetailEnvelope' } } },
+      }
+    InvitationSuccess:
+      {
+        description: Invitación y token efímero,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/InvitationEnvelope' } } },
+      }
+    MembershipSuccess:
+      {
+        description: Membresía aceptada,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/MembershipEnvelope' } } },
+      }
+    EventSuccess:
+      {
+        description: Evento creado,
+        content: { application/json: { schema: { $ref: '#/components/schemas/EventEnvelope' } } },
+      }
+    EventListSuccess:
+      {
+        description: Eventos,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/EventListEnvelope' } } },
+      }
+    EventDetailSuccess:
+      {
+        description: Detalle de evento,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/EventDetailEnvelope' } } },
+      }
+    ExpenseListSuccess:
+      {
+        description: Gastos,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/ExpenseListEnvelope' } } },
+      }
+    ExpenseDetailSuccess:
+      {
+        description: Detalle de gasto,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/ExpenseDetailEnvelope' } } },
+      }
+    SettlementListSuccess:
+      {
+        description: Liquidaciones,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/SettlementListEnvelope' } } },
+      }
+    SettlementDetailSuccess:
+      {
+        description: Detalle de liquidación,
+        content:
+          {
+            application/json: { schema: { $ref: '#/components/schemas/SettlementDetailEnvelope' } },
+          },
+      }
+    TransferSuccess:
+      {
+        description: Transferencia pagada o recuperación idempotente,
+        content:
+          { application/json: { schema: { $ref: '#/components/schemas/TransferEnvelope' } } },
+      }
+    BadRequest:
+      {
+        description: Entrada inválida,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+    Unauthorized:
+      {
+        description: Sesión ausente o inválida,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+    Forbidden:
+      {
+        description: CSRF o permiso inválido,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+    NotFound:
+      {
+        description: Recurso no visible,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+    Conflict:
+      {
+        description: Estado concurrente o idempotencia incompatible,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+    Gone:
+      {
+        description: Invitación vencida,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+    UnprocessableEntity:
+      {
+        description: Invariante de negocio incumplida,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+    TooManyRequests:
+      {
+        description: Límite de solicitudes excedido,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+    ServiceUnavailable:
+      {
+        description: PostgreSQL no disponible,
+        content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
+      }
+  schemas:
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [success, error]
+      properties:
+        success: { const: false }
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+            details: {}
+    HealthEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        {
+          success: { const: true },
+          data: { type: object, required: [status], properties: { status: { enum: [up, ready] } } },
+        }
+    MutationEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        {
+          success: { const: true },
+          data: { type: object, additionalProperties: { type: boolean } },
+        }
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, email, displayName, avatarUrl]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        avatarUrl: { type: [string, 'null'], format: uri }
+    AuthEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data:
+          type: object
+          additionalProperties: false
+          required: [user, csrfToken]
+          properties: { user: { $ref: '#/components/schemas/User' }, csrfToken: { type: string } }
+    RegisterInput:
+      type: object
+      additionalProperties: false
+      required: [email, password, displayName]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, minLength: 12, maxLength: 128 }
+        displayName: { type: string, minLength: 2, maxLength: 120 }
+    LoginInput:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, minLength: 12, maxLength: 128 }
+    Group:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, currency, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    GroupEnvelope:
+      type: object
+      required: [success, data]
+      properties: { success: { const: true }, data: { $ref: '#/components/schemas/Group' } }
+    GroupListItem:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          required: [members, _count]
+          properties:
+            members: { type: array, items: { $ref: '#/components/schemas/Membership' } }
+            _count:
+              {
+                type: object,
+                required: [members, events, expenses],
+                properties:
+                  {
+                    members: { type: integer },
+                    events: { type: integer },
+                    expenses: { type: integer },
+                  },
+              }
+    GroupListEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        {
+          success: { const: true },
+          data: { type: array, items: { $ref: '#/components/schemas/GroupListItem' } },
+        }
+    Membership:
+      type: object
+      required: [id, role]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        role: { enum: [OWNER, ADMIN, MEMBER] }
+        joinedAt: { type: string, format: date-time }
+    GroupDetail:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          required: [members]
+          properties:
+            members:
+              type: array
+              items:
+                allOf:
+                  - $ref: '#/components/schemas/Membership'
+                  - type: object
+                    required: [user]
+                    properties: { user: { $ref: '#/components/schemas/User' } }
+    GroupDetailEnvelope:
+      type: object
+      required: [success, data]
+      properties: { success: { const: true }, data: { $ref: '#/components/schemas/GroupDetail' } }
+    GroupInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        currency: { type: string, pattern: '^[A-Z]{3}$', default: USD }
+    GroupPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 500 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    InvitationInput:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        {
+          email: { type: string, format: email, maxLength: 320 },
+          role: { enum: [ADMIN, MEMBER], default: MEMBER },
+        }
+    AcceptInvitationInput:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties: { token: { type: string, minLength: 20, maxLength: 200 } }
+    InvitationEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data:
+          type: object
+          required: [invitation, token]
+          properties:
+            token: { type: string }
+            invitation:
+              {
+                type: object,
+                required: [id, groupId, email, role, status, expiresAt],
+                properties:
+                  {
+                    id: { type: string, format: uuid },
+                    groupId: { type: string, format: uuid },
+                    email: { type: string, format: email },
+                    role: { enum: [ADMIN, MEMBER] },
+                    status: { const: PENDING },
+                    expiresAt: { type: string, format: date-time },
+                  },
+              }
+    MembershipEnvelope:
+      type: object
+      required: [success, data]
+      properties: { success: { const: true }, data: { $ref: '#/components/schemas/Membership' } }
+    EventBase:
+      type: object
+      required: [id, groupId, name, description, startsAt, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        startsAt: { type: string, format: date-time }
+        status: { enum: [OPEN, CLOSED, CANCELLED] }
+        createdAt: { type: string, format: date-time }
+    EventParticipant:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, format: uuid }
+        groupMemberId: { type: [string, 'null'], format: uuid }
+        guestName: { type: [string, 'null'] }
+        groupMember: { type: [object, 'null'] }
+    EventEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data:
+          allOf:
+            - $ref: '#/components/schemas/EventBase'
+            - type: object
+              required: [participants]
+              properties:
+                {
+                  participants:
+                    { type: array, items: { $ref: '#/components/schemas/EventParticipant' } },
+                }
+    EventListEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        {
+          success: { const: true },
+          data: { type: array, items: { $ref: '#/components/schemas/EventBase' } },
+        }
+    EventDetailEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data:
+          allOf:
+            - $ref: '#/components/schemas/EventBase'
+            - type: object
+              required: [participants, links, settlement, _count]
+              properties:
+                participants:
+                  { type: array, items: { $ref: '#/components/schemas/EventParticipant' } }
+                links:
+                  {
+                    type: array,
+                    items:
+                      {
+                        type: object,
+                        required: [id, label, url],
+                        properties:
+                          {
+                            id: { type: string, format: uuid },
+                            label: { type: string },
+                            url: { type: string, format: uri, pattern: '^https?://' },
+                          },
+                      },
+                  }
+                settlement:
+                  oneOf:
+                    - type: 'null'
+                    - type: object
+                      required: [id, status, createdAt]
+                      properties:
+                        id: { type: string, format: uuid }
+                        status: { enum: [OPEN, COMPLETED, CANCELLED] }
+                        createdAt: { type: string, format: date-time }
+                _count:
+                  {
+                    type: object,
+                    required: [expenses],
+                    properties: { expenses: { type: integer } },
+                  }
+    EventInput:
+      type: object
+      additionalProperties: false
+      required: [name, startsAt]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 160 }
+        description: { type: string, maxLength: 1000 }
+        startsAt: { type: string, format: date-time }
+        memberIds:
+          { type: array, maxItems: 100, default: [], items: { type: string, format: uuid } }
+        guests:
+          {
+            type: array,
+            maxItems: 100,
+            default: [],
+            items: { type: string, minLength: 1, maxLength: 120 },
+          }
+        links:
+          type: array
+          maxItems: 20
+          default: []
+          items:
+            type: object
+            additionalProperties: false
+            required: [label, url]
+            properties:
+              {
+                label: { type: string, minLength: 1, maxLength: 80 },
+                url: { type: string, format: uri, maxLength: 2048, pattern: '^https?://' },
+              }
+    AllocationInput:
+      type: object
+      additionalProperties: false
+      required: [eventParticipantId, amountCents]
+      properties:
+        {
+          eventParticipantId: { type: string, format: uuid },
+          amountCents: { type: integer, minimum: 1, maximum: 2147483647 },
+        }
+    ExpenseInput:
+      type: object
+      additionalProperties: false
+      required: [eventId, title, totalCents, currency, splitMode, occurredAt, participants, payers]
+      properties:
+        eventId: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 160 }
+        notes: { type: string, maxLength: 1000 }
+        totalCents: { type: integer, minimum: 1, maximum: 2147483647 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        splitMode: { enum: [EQUAL, EXACT] }
+        occurredAt: { type: string, format: date-time }
+        participants:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            {
+              type: object,
+              additionalProperties: false,
+              required: [eventParticipantId],
+              properties:
+                {
+                  eventParticipantId: { type: string, format: uuid },
+                  shareCents: { type: integer, minimum: 1, maximum: 2147483647 },
+                },
+            }
+        payers:
+          {
+            type: array,
+            minItems: 1,
+            maxItems: 200,
+            items: { $ref: '#/components/schemas/AllocationInput' },
+          }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, amountCents, allocations]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 160 }
+              amountCents: { type: integer, minimum: 1, maximum: 2147483647 }
+              quantity: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+              allocations:
+                {
+                  type: array,
+                  minItems: 1,
+                  maxItems: 200,
+                  items: { $ref: '#/components/schemas/AllocationInput' },
+                }
+    ExpenseSummary:
+      type: object
+      required: [id, eventId, title, totalCents, currency, splitMode, occurredAt, createdAt, _count]
+      properties:
+        id: { type: string, format: uuid }
+        eventId: { type: string, format: uuid }
+        title: { type: string }
+        totalCents: { type: integer }
+        currency: { type: string }
+        splitMode: { enum: [EQUAL, EXACT] }
+        occurredAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        _count:
+          {
+            type: object,
+            required: [participants, items],
+            properties: { participants: { type: integer }, items: { type: integer } },
+          }
+    ExpenseListEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        {
+          success: { const: true },
+          data: { type: array, items: { $ref: '#/components/schemas/ExpenseSummary' } },
+        }
+    ExpenseDetail:
+      type: object
+      required:
+        [
+          id,
+          groupId,
+          eventId,
+          title,
+          notes,
+          totalCents,
+          currency,
+          splitMode,
+          occurredAt,
+          createdAt,
+          participants,
+          payers,
+          items,
+        ]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        eventId: { type: string, format: uuid }
+        title: { type: string }
+        notes: { type: [string, 'null'] }
+        totalCents: { type: integer }
+        currency: { type: string }
+        splitMode: { enum: [EQUAL, EXACT] }
+        occurredAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        participants:
+          {
+            type: array,
+            items:
+              {
+                type: object,
+                required: [id, eventParticipantId, shareCents, eventParticipant],
+                properties:
+                  {
+                    id: { type: string, format: uuid },
+                    eventParticipantId: { type: string, format: uuid },
+                    shareCents: { type: integer },
+                    eventParticipant:
+                      {
+                        type: object,
+                        required: [guestName, groupMemberId],
+                        properties:
+                          {
+                            guestName: { type: [string, 'null'] },
+                            groupMemberId: { type: [string, 'null'], format: uuid },
+                          },
+                      },
+                  },
+              },
+          }
+        payers: { type: array, items: { $ref: '#/components/schemas/ExpensePayer' } }
+        items: { type: array, items: { $ref: '#/components/schemas/ExpenseItem' } }
+    ExpensePayer:
+      type: object
+      required: [id, amountCents, expenseParticipant]
+      properties:
+        id: { type: string, format: uuid }
+        amountCents: { type: integer }
+        expenseParticipant:
+          type: object
+          required: [eventParticipantId]
+          properties: { eventParticipantId: { type: string, format: uuid } }
+    ExpenseItemAllocation:
+      type: object
+      required: [amountCents, expenseParticipant]
+      properties:
+        amountCents: { type: integer }
+        expenseParticipant:
+          type: object
+          required: [eventParticipantId]
+          properties: { eventParticipantId: { type: string, format: uuid } }
+    ExpenseItem:
+      type: object
+      required: [id, name, amountCents, quantity, allocations]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        amountCents: { type: integer }
+        quantity: { type: integer }
+        allocations:
+          type: array
+          items: { $ref: '#/components/schemas/ExpenseItemAllocation' }
+    ExpenseDetailEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data: { $ref: '#/components/schemas/ExpenseDetail' }
+        meta: { type: object, properties: { idempotencyReplayed: { type: boolean } } }
+    SettlementInput:
+      type: object
+      additionalProperties: false
+      required: [eventId]
+      properties: { eventId: { type: string, format: uuid } }
+    Transfer:
+      type: object
+      required: [id, debtorParticipantId, creditorParticipantId, amountCents, status, paidAt]
+      properties:
+        id: { type: string, format: uuid }
+        debtorParticipantId: { type: string, format: uuid }
+        creditorParticipantId: { type: string, format: uuid }
+        amountCents: { type: integer }
+        status: { enum: [PENDING, PAID, DISPUTED, CANCELLED] }
+        paidAt: { type: [string, 'null'], format: date-time }
+        debtor: { $ref: '#/components/schemas/TransferParty' }
+        creditor: { $ref: '#/components/schemas/TransferParty' }
+        history:
+          {
+            type: array,
+            items:
+              {
+                type: object,
+                required: [fromStatus, toStatus, createdAt],
+                properties:
+                  {
+                    fromStatus: { type: [string, 'null'] },
+                    toStatus: { enum: [PENDING, PAID, DISPUTED, CANCELLED] },
+                    createdAt: { type: string, format: date-time },
+                  },
+              },
+          }
+    TransferParty:
+      type: object
+      required: [guestName, groupMemberId]
+      properties:
+        guestName: { type: [string, 'null'] }
+        groupMemberId: { type: [string, 'null'], format: uuid }
+    SettlementSummary:
+      type: object
+      required: [id, eventId, status, currency, createdAt, completedAt, _count]
+      properties:
+        id: { type: string, format: uuid }
+        eventId: { type: string, format: uuid }
+        status: { enum: [OPEN, COMPLETED, CANCELLED] }
+        currency: { type: string }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        _count:
+          { type: object, required: [transfers], properties: { transfers: { type: integer } } }
+    SettlementListEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        {
+          success: { const: true },
+          data: { type: array, items: { $ref: '#/components/schemas/SettlementSummary' } },
+        }
+    SettlementDetail:
+      type: object
+      required: [id, groupId, eventId, status, currency, createdAt, completedAt, transfers]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        eventId: { type: string, format: uuid }
+        status: { enum: [OPEN, COMPLETED, CANCELLED] }
+        currency: { type: string }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        transfers: { type: array, items: { $ref: '#/components/schemas/Transfer' } }
+    SettlementDetailEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data: { $ref: '#/components/schemas/SettlementDetail' }
+        meta: { type: object, properties: { idempotencyReplayed: { type: boolean } } }
+    TransferEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data:
+          {
+            type: object,
+            required: [id, status, amountCents, paidAt],
+            properties:
+              {
+                id: { type: string, format: uuid },
+                status: { const: PAID },
+                amountCents: { type: integer },
+                paidAt: { type: string, format: date-time },
+              },
+          }
