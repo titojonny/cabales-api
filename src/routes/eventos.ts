@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { prisma } from '../config/prisma.js';
 import { registrarPago } from '../controllers/pagos.js';
+import { obtenerTransaccionesDeEvento } from '../controllers/transacciones.js';
 import { cerrarEvento } from '../controllers/cierre.js';
 import { obtenerEventoDetalle } from '../controllers/eventos.js';
 import { registrarConsumo } from '../controllers/consumos.js';
@@ -56,6 +57,9 @@ router.post('/events/:id/consumptions', validateBody(crearConsumoSchema), regist
 
 // Registrar un pago en centavos (acumula a monto_pagado_centavos)
 router.post('/events/:id/payments', validateBody(registrarPagoSchema), registrarPago);
+
+// Listar transacciones de un evento (Quién le debe a quién)
+router.get('/events/:id/transactions', obtenerTransaccionesDeEvento);
 
 // Liquidar la mesa — motor de flujo mínimo de efectivo
 router.post('/events/:id/close', cerrarEvento);

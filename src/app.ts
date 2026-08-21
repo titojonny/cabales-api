@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 import { errorHandler, notFound } from './middlewares/errorHandler.js';
 import eventosRouter from './routes/eventos.js';
 import healthRouter from './routes/health.js';
+import transaccionesRouter from './routes/transacciones.js';
 import usuariosRouter from './routes/usuarios.js';
 
 export const app = express();
@@ -28,6 +29,7 @@ app.use(express.json());
 app.use('/api', healthRouter);
 app.use('/api', usuariosRouter);
 app.use('/api', eventosRouter);
+app.use('/api', transaccionesRouter);
 
 // Manejo de errores (siempre al final)
 app.use(notFound);

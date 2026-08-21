@@ -48,6 +48,8 @@ npm run dev
 | POST   | `/api/events/:id/participants`        | Sentar a un comensal (usuario o fantasma)     | `{ "usuario_id": "uuid" }` o `{ "nombre_invitado": "..." }` (nunca ambos) |
 | POST   | `/api/events/:id/consumptions`        | Registrar consumo individual o compartido     | `{ "monto_centavos": 10000, "participante_ids": ["uuid"] }` |
 | POST   | `/api/events/:id/payments`            | Registrar pago de un comensal (acumula)       | `{ "participante_id": "uuid", "monto_centavos": 5000 }` |
+| GET    | `/api/events/:id/transactions`        | Listar quién le debe a quién (con comprobantes) | - |
+| PATCH  | `/api/transactions/:id/status`        | Avanzar estado de una transacción (máquina)   | `{ "estado": "EN_REVISION", "comprobante_url": "https://..." }` |
 | POST   | `/api/events/:id/close`               | Liquidar la mesa (flujo mínimo de efectivo)   | - |
 
 > **Dinero:** todos los montos viajan en **centavos enteros** (`monto_centavos`). Nunca decimales de dólar en la API.
@@ -58,6 +60,7 @@ npm run dev
 2. `POST /api/events` con `{ "nombre": "Cena por el proyecto", "creador_id": "<id del paso 1>" }` → evento creado.
 3. `POST /api/events/:id/participants` + `POST /api/events/:id/consumptions` + `POST /api/events/:id/payments` → arma la mesa sin tocar SQL.
 4. `POST /api/events/:id/close` → liquida con el mínimo de transferencias.
+5. `GET /api/events/:id/transactions` + `PATCH /api/transactions/:id/status` → sigue el cobro (PENDIENTE → EN_REVISION → COMPLETADO, o directo a COMPLETADO por efectivo).
 
 ## Tests
 
@@ -73,8 +76,8 @@ src/
   index.ts              # Arranque del servidor
   app.ts                # Configuración de Express (middleware + rutas)
   config/prisma.ts      # Instancia única de PrismaClient
-  routes/               # Definición de endpoints (health, usuarios, eventos)
-  controllers/          # Lógica de negocio (participantes, consumos, pagos, cierre)
+  routes/               # Definición de endpoints (health, usuarios, eventos, transacciones)
+  controllers/          # Lógica de negocio (participantes, consumos, pagos, cierre, transacciones)
   middlewares/          # errorHandler + validateBody (zod)
   validators/           # Schemas de zod para el req.body
   utils/money.ts        # Utilidades de dinero en centavos (reparto exacto)
