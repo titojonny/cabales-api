@@ -14,6 +14,17 @@ async function crearUsuario(email: string): Promise<string> {
   return res.body.data.id;
 }
 
+async function crearTransaccionAislada(creadorId: string): Promise<string> {
+  const eventoId = (await request(app).post('/api/events').send({ nombre: 'Tx Aislada', creador_id: creadorId })).body.data.id;
+  const pa = (await request(app).post(`/api/events/${eventoId}/participants`).send({ usuario_id: creadorId })).body.data.id;
+  const pb = (await request(app).post(`/api/events/${eventoId}/participants`).send({ nombre_invitado: 'F Aislado' })).body.data.id;
+  await request(app).post(`/api/events/${eventoId}/consumptions`).send({ monto_centavos: 10000, participante_ids: [pa, pb] });
+  await request(app).post(`/api/events/${eventoId}/payments`).send({ participante_id: pa, monto_centavos: 10000 });
+  await request(app).post(`/api/events/${eventoId}/close`);
+  const tx = await prisma.transaccion.findFirst({ where: { evento_id: eventoId }, orderBy: { creado_en: 'asc' } });
+  return tx!.id;
+}
+
 beforeAll(async () => {
   usuarioId = await crearUsuario(`tx-${Date.now()}@example.com`);
   eventoId = (await request(app).post('/api/events').send({ nombre: 'Mesa Tx', creador_id: usuarioId })).body.data.id;
@@ -142,9 +153,70 @@ describe('PATCH /api/transactions/:id/status', () => {
   });
 });
 
+describe('PATCH /api/transactions/:id/status — EN_DISPUTA y bordes', () => {
+  it('PENDIENTE -> EN_DISPUTA (200)', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    const res = await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_DISPUTA' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.estado).toBe('EN_DISPUTA');
+  });
+
+  it('EN_REVISION -> EN_DISPUTA (200)', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_REVISION', comprobante_url: 'https://example.com/c.jpg' });
+    const res = await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_DISPUTA' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.estado).toBe('EN_DISPUTA');
+  });
+
+  it('EN_DISPUTA -> EN_REVISION (200)', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_DISPUTA' });
+    const res = await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_REVISION', comprobante_url: 'https://example.com/c2.jpg' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.estado).toBe('EN_REVISION');
+  });
+
+  it('EN_DISPUTA -> COMPLETADO (200)', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_DISPUTA' });
+    const res = await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'COMPLETADO' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.estado).toBe('COMPLETADO');
+  });
+
+  it('PENDIENTE -> EN_REVISION con URL inválida → 400', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    const res = await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_REVISION', comprobante_url: 'no-es-url' });
+    expect(res.status).toBe(400);
+  });
+
+  it('EN_REVISION setea fecha_limite a +7 días', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    const res = await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_REVISION', comprobante_url: 'https://example.com/c.jpg' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.fecha_limite).toBeDefined();
+    const diff = new Date(res.body.data.fecha_limite).getTime() - Date.now();
+    expect(diff).toBeGreaterThan(600000000);
+    expect(diff).toBeLessThan(650000000);
+  });
+
+  it('idempotencia: mismo estado devuelve 200 con mensaje', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_REVISION', comprobante_url: 'https://example.com/c.jpg' });
+    const res = await request(app).patch(`/api/transactions/${txId}/status`).send({ estado: 'EN_REVISION', comprobante_url: 'https://example.com/c.jpg' });
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('La transacción ya está en ese estado');
+  });
+});
+
 afterAll(async () => {
-  await prisma.transaccion.deleteMany({ where: { evento_id: { in: [eventoId, eventoVacioId] } } });
-  await prisma.participante.deleteMany({ where: { evento_id: { in: [eventoId, eventoVacioId] } } });
-  await prisma.evento.deleteMany({ where: { id: { in: [eventoId, eventoVacioId] } } });
+  const eventosDelUsuario = await prisma.evento.findMany({ where: { creador_id: usuarioId }, select: { id: true } });
+  const ids = eventosDelUsuario.map((e) => e.id);
+  if (ids.length > 0) {
+    await prisma.transaccion.deleteMany({ where: { evento_id: { in: ids } } });
+    await prisma.participante.deleteMany({ where: { evento_id: { in: ids } } });
+    await prisma.evento.deleteMany({ where: { id: { in: ids } } });
+  }
   await prisma.usuario.deleteMany({ where: { id: usuarioId } });
 });

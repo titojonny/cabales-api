@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { TRANSICIONES_PERMITIDAS, type TransicionesPermitidas } from '../utils/settlement.js';
+import type { EstadoTransaccion } from '@prisma/client';
 
 // PATCH /api/transactions/:id/status — solo exige comprobante si va a EN_REVISION
 // PENDIENTE -> COMPLETADO directo permitido (efectivo / confirmación del acreedor).
@@ -14,14 +16,10 @@ export const actualizarEstadoTransaccionSchema = z
     path: ['comprobante_url']
   });
 
-// Matriz de transiciones permitidas — COMPLETADO es terminal
-export const TRANSICIONES_PERMITIDAS: Record<string, string[]> = {
-  PENDIENTE: ['EN_REVISION', 'COMPLETADO', 'EN_DISPUTA'],
-  EN_REVISION: ['COMPLETADO', 'EN_DISPUTA'],
-  EN_DISPUTA: ['EN_REVISION', 'COMPLETADO'],
-  COMPLETADO: []
-};
+// Re-exportamos desde settlement para mantener una sola fuente de verdad
+export { TRANSICIONES_PERMITIDAS, type TransicionesPermitidas } from '../utils/settlement.js';
 
 export function esTransicionPermitida(actual: string, siguiente: string): boolean {
-  return TRANSICIONES_PERMITIDAS[actual]?.includes(siguiente) ?? false;
+  const permitidas = TRANSICIONES_PERMITIDAS[actual as EstadoTransaccion];
+  return permitidas?.includes(siguiente as EstadoTransaccion) ?? false;
 }

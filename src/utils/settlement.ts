@@ -1,6 +1,8 @@
 // Motor matemático de Cabales: cálculo de balances y flujo mínimo de efectivo.
 // Todo en centavos (Int) — cero Float.
 
+import { EstadoTransaccion } from '@prisma/client';
+
 export interface ParticipanteBalance {
   id: string;
   balance: number; // >0 deudor, <0 acreedor, 0 liquidado
@@ -20,6 +22,23 @@ export interface Transferencia {
   deudorId: string;
   acreedorId: string;
   monto_centavos: number;
+}
+
+// 7 días en milisegundos — usado para fecha_limite al pasar a EN_REVISION
+export const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Tipado estricto de la matriz de transiciones permitidas
+export type TransicionesPermitidas = Record<EstadoTransaccion, EstadoTransaccion[]>;
+
+export const TRANSICIONES_PERMITIDAS: TransicionesPermitidas = {
+  PENDIENTE: ['EN_REVISION', 'COMPLETADO', 'EN_DISPUTA'],
+  EN_REVISION: ['COMPLETADO', 'EN_DISPUTA'],
+  EN_DISPUTA: ['EN_REVISION', 'COMPLETADO'],
+  COMPLETADO: [],
+};
+
+export function esTransicionPermitida(actual: EstadoTransaccion, siguiente: EstadoTransaccion): boolean {
+  return TRANSICIONES_PERMITIDAS[actual]?.includes(siguiente) ?? false;
 }
 
 // balance = consumido - pagado

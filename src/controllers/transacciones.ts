@@ -2,21 +2,17 @@ import { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../middlewares/errorHandler.js';
-import {
-  actualizarEstadoTransaccionSchema,
-  esTransicionPermitida
-} from '../validators/transacciones.js';
+import { assertParamId } from '../middlewares/assertParamId.js';
+import { mapearParticipante } from '../utils/participante.js';
+import { actualizarEstadoTransaccionSchema } from '../validators/transacciones.js';
+import { esTransicionPermitida, SIETE_DIAS_MS } from '../utils/settlement.js';
 
 type CuerpoEstado = z.infer<typeof actualizarEstadoTransaccionSchema>;
 
 // GET /api/events/:id/transactions — lista completa, sin filtros (3-15 filas máximo)
 export const obtenerTransaccionesDeEvento = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id: eventoId } = req.params;
-
-    if (typeof eventoId !== 'string' || eventoId.length === 0) {
-      throw new HttpError(400, 'Falta el id del evento');
-    }
+    const eventoId = assertParamId(req.params.id, 'evento');
 
     const evento = await prisma.evento.findUnique({ where: { id: eventoId }, select: { id: true } });
     if (!evento) {
@@ -41,22 +37,8 @@ export const obtenerTransaccionesDeEvento = async (req: Request, res: Response, 
       fecha_limite: t.fecha_limite,
       creado_en: t.creado_en,
       actualizado_en: t.actualizado_en,
-      deudor: {
-        id: t.deudor.id,
-        nombre_visible: t.deudor.usuario?.nombre ?? t.deudor.nombre_invitado,
-        es_fantasma: !t.deudor.usuario,
-        usuario_id: t.deudor.usuario_id,
-        monto_consumido_centavos: t.deudor.monto_consumido_centavos,
-        monto_pagado_centavos: t.deudor.monto_pagado_centavos
-      },
-      acreedor: {
-        id: t.acreedor.id,
-        nombre_visible: t.acreedor.usuario?.nombre ?? t.acreedor.nombre_invitado,
-        es_fantasma: !t.acreedor.usuario,
-        usuario_id: t.acreedor.usuario_id,
-        monto_consumido_centavos: t.acreedor.monto_consumido_centavos,
-        monto_pagado_centavos: t.acreedor.monto_pagado_centavos
-      }
+      deudor: mapearParticipante(t.deudor),
+      acreedor: mapearParticipante(t.acreedor)
     }));
 
     res.status(200).json({ success: true, message: 'Transacciones obtenidas', data });
@@ -68,11 +50,7 @@ export const obtenerTransaccionesDeEvento = async (req: Request, res: Response, 
 // PATCH /api/transactions/:id/status — máquina de estados
 export const actualizarEstadoTransaccion = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id: transaccionId } = req.params;
-
-    if (typeof transaccionId !== 'string' || transaccionId.length === 0) {
-      throw new HttpError(400, 'Falta el id de la transacción');
-    }
+    const transaccionId = assertParamId(req.params.id, 'transacción');
 
     const parse = actualizarEstadoTransaccionSchema.safeParse(req.body);
     if (!parse.success) {
@@ -105,7 +83,7 @@ export const actualizarEstadoTransaccion = async (req: Request, res: Response, n
       data: {
         estado: nuevoEstado,
         ...(comprobante_url !== undefined ? { comprobante_url } : {}),
-        ...(nuevoEstado === 'EN_REVISION' ? { fecha_limite: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) } : {})
+        ...(nuevoEstado === 'EN_REVISION' ? { fecha_limite: new Date(Date.now() + SIETE_DIAS_MS) } : {})
       }
     });
 
