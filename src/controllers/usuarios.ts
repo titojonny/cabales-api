@@ -1,6 +1,41 @@
 import { NextFunction, Request, Response } from 'express';
+import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../middlewares/errorHandler.js';
+import { Prisma } from '@prisma/client';
+import { crearUsuarioSchema } from '../validators/schemas.js';
+
+type CuerpoUsuario = z.infer<typeof crearUsuarioSchema>;
+
+// Crear un usuario nuevo
+export const crearUsuario = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parse = crearUsuarioSchema.safeParse(req.body);
+
+    if (!parse.success) {
+      res.status(400).json({
+        success: false,
+        message: 'Datos inválidos',
+        error: parse.error.issues.map((issue) => issue.message)
+      });
+      return;
+    }
+
+    const { nombre, email } = parse.data;
+
+    const nuevoUsuario = await prisma.usuario.create({
+      data: { nombre, email }
+    });
+
+    res.status(201).json({ success: true, message: 'Usuario creado', data: nuevoUsuario });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      res.status(409).json({ success: false, message: 'Ya existe un usuario con ese email' });
+      return;
+    }
+    next(error);
+  }
+};
 
 // Dashboard del usuario: sus salidas como creador o como invitado.
 // El OR no duplica eventos: si es creador Y participante, sale una sola vez.

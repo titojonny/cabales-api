@@ -1,6 +1,46 @@
 import { NextFunction, Request, Response } from 'express';
+import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../middlewares/errorHandler.js';
+import { Prisma } from '@prisma/client';
+import { crearEventoSchema } from '../validators/schemas.js';
+
+type CuerpoEvento = z.infer<typeof crearEventoSchema>;
+
+// Crear un evento nuevo
+export const crearEvento = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const parse = crearEventoSchema.safeParse(req.body);
+
+    if (!parse.success) {
+      res.status(400).json({
+        success: false,
+        message: 'Datos inválidos',
+        error: parse.error.issues.map((issue) => issue.message)
+      });
+      return;
+    }
+
+    const { nombre, creador_id } = parse.data;
+
+    const creador = await prisma.usuario.findUnique({ where: { id: creador_id } });
+    if (!creador) {
+      throw new HttpError(404, 'El usuario creador no existe');
+    }
+
+    const nuevoEvento = await prisma.evento.create({
+      data: { nombre, creador_id }
+    });
+
+    res.status(201).json({ success: true, message: '¡Salida creada!', data: nuevoEvento });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      res.status(409).json({ success: false, message: 'Ya existe un evento con ese nombre' });
+      return;
+    }
+    next(error);
+  }
+};
 
 // Radiografía de la mesa: detalle completo de un evento.
 // Los participantes vienen ordenados por consumo DESC (vista "quién consumió más").

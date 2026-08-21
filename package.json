@@ -1,17 +1,23 @@
 {
   "name": "cabales-api",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "API para dividir gastos de salidas grupales — Cabales",
+  "main": "dist/index.js",
+  "type": "module",
+  "engines": { "node": ">=20" },
   "scripts": {
-    "test": "vitest run",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "dev": "tsx watch src/index.ts"
+    "test": "vitest run",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy"
   },
-  "keywords": [],
+  "keywords": ["cabales", "gastos", "split", "bills", "friends"],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.9.1",
     "@prisma/client": "^7.9.1",
@@ -24,7 +30,6 @@
     "@types/express": "^5.0.6",
     "@types/node": "^26.2.0",
     "@types/supertest": "^7.2.1",
-    "dotenv": "^17.4.2",
     "prisma": "^7.9.1",
     "supertest": "^7.2.2",
     "tsx": "^4.23.12",

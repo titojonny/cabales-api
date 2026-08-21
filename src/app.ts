@@ -11,6 +11,11 @@ export const app = express();
 
 // Seguridad básica: cabeceras HTTP y límite de peticiones por IP
 app.use(helmet());
+// Si se despliega detrás de proxy (nginx, Cloudflare, etc.), descomenta:
+// app.set('trust proxy', 1);
+// Si el frontend está en otro origen, habilita CORS:
+// import cors from 'cors'; app.use(cors({ origin: process.env.FRONTEND_URL }));
+
 app.use(
   '/api',
   rateLimit({
@@ -22,8 +27,8 @@ app.use(
   })
 );
 
-// Middleware para que Express entienda JSON
-app.use(express.json());
+// Middleware para que Express entienda JSON con límite de payload
+app.use(express.json({ limit: '10kb' }));
 
 // Rutas de la API
 app.use('/api', healthRouter);
