@@ -1,6 +1,7 @@
 import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { corsMiddleware } from './config/cors.js';
 import { errorHandler, notFound } from './middlewares/errorHandler.js';
 import eventosRouter from './routes/eventos.js';
 import healthRouter from './routes/health.js';
@@ -9,12 +10,18 @@ import usuariosRouter from './routes/usuarios.js';
 
 export const app = express();
 
-// Seguridad básica: cabeceras HTTP y límite de peticiones por IP
-app.use(helmet());
-// Si se despliega detrás de proxy (nginx, Cloudflare, etc.), descomenta:
-// app.set('trust proxy', 1);
-// Si el frontend está en otro origen, habilita CORS:
-// import cors from 'cors'; app.use(cors({ origin: process.env.FRONTEND_URL }));
+// Confianza en proxies inversos (ej. Nginx, Fly.io, Railway, Render)
+app.set('trust proxy', 1);
+
+// Habilitar CORS para Angular, Ionic dev servers y WebView Capacitor
+app.use(corsMiddleware);
+
+// Seguridad HTTP permitiendo consumo cross-origin de recursos
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
+  })
+);
 
 app.use(
   '/api',

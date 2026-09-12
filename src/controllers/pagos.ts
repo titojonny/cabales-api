@@ -10,21 +10,8 @@ type CuerpoPago = z.infer<typeof registrarPagoSchema>;
 // Soporta pagos parciales: 3000 + 2000 acumulan sin necesidad de leer el total previo.
 export const registrarPago = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id: rutaId } = req.params;
+    const eventoId = req.evento!.id;
     const { participante_id, monto_centavos } = req.body as CuerpoPago;
-
-    if (typeof rutaId !== 'string' || rutaId.length === 0) {
-      throw new HttpError(400, 'Falta el id del evento');
-    }
-    const eventoId = rutaId;
-
-    const evento = await prisma.evento.findUnique({ where: { id: eventoId } });
-    if (!evento) {
-      throw new HttpError(404, 'El evento no existe');
-    }
-    if (evento.estado === 'CERRADO') {
-      throw new HttpError(409, 'No puedes registrar pagos en una cuenta cerrada');
-    }
 
     const participante = await prisma.participante.findFirst({
       where: { id: participante_id, evento_id: eventoId }

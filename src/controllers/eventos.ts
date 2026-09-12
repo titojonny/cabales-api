@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../middlewares/errorHandler.js';
+import { assertParamId } from '../middlewares/assertParamId.js';
 import { Prisma } from '@prisma/client';
 import { crearEventoSchema } from '../validators/schemas.js';
 
@@ -46,11 +47,7 @@ export const crearEvento = async (req: Request, res: Response, next: NextFunctio
 // Los participantes vienen ordenados por consumo DESC (vista "quién consumió más").
 export const obtenerEventoDetalle = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id: eventoId } = req.params;
-
-    if (typeof eventoId !== 'string' || eventoId.length === 0) {
-      throw new HttpError(400, 'Falta el id del evento');
-    }
+    const eventoId = assertParamId(req.params.id, 'evento');
 
     const evento = await prisma.evento.findUnique({
       where: { id: eventoId },

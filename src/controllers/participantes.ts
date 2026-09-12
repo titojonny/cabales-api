@@ -9,24 +9,10 @@ type CuerpoParticipante = z.infer<typeof agregarParticipanteSchema>;
 // Agregar un comensal a la mesa (usuario registrado o invitado fantasma)
 export const agregarParticipante = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id: rutaId } = req.params;
+    const evento_id = req.evento!.id;
     const { usuario_id, nombre_invitado } = req.body as CuerpoParticipante;
 
-    if (typeof rutaId !== 'string' || rutaId.length === 0) {
-      throw new HttpError(400, 'Falta el id del evento');
-    }
-    const evento_id = rutaId;
-
-    // 1. El evento debe existir y no estar cerrado
-    const evento = await prisma.evento.findUnique({ where: { id: evento_id } });
-    if (!evento) {
-      throw new HttpError(404, 'El evento no existe');
-    }
-    if (evento.estado === 'CERRADO') {
-      throw new HttpError(409, 'No puedes agregar personas a una cuenta cerrada');
-    }
-
-    // 2. Evitar que el mismo usuario registrado se siente dos veces
+    // 1. Evitar que el mismo usuario registrado se siente dos veces
     // (la garantía real la da el índice único @@unique([evento_id, usuario_id]))
     if (usuario_id) {
       const existe = await prisma.participante.findFirst({
@@ -37,7 +23,7 @@ export const agregarParticipante = async (req: Request, res: Response, next: Nex
       }
     }
 
-    // 3. Sentar al comensal en la tabla pivote
+    // 2. Sentar al comensal en la tabla pivote
     const nuevoParticipante = await prisma.participante.create({
       data: {
         evento_id,

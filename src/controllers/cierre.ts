@@ -7,29 +7,17 @@ import { calcularBalances, flujoMinimoEfectivo } from '../utils/settlement.js';
 // Transacción atómica masiva: cambia estado a CERRADO + genera Transacciones mínimas
 export const cerrarEvento = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id: rutaId } = req.params;
+    const eventoId = req.evento!.id;
 
-    if (typeof rutaId !== 'string' || rutaId.length === 0) {
-      throw new HttpError(400, 'Falta el id del evento');
-    }
-    const eventoId = rutaId;
-
-    const evento = await prisma.evento.findUnique({
-      where: { id: eventoId },
-      include: { participantes: true }
+    const participantes = await prisma.participante.findMany({
+      where: { evento_id: eventoId }
     });
 
-    if (!evento) {
-      throw new HttpError(404, 'El evento no existe');
-    }
-    if (evento.estado === 'CERRADO') {
-      throw new HttpError(409, 'La mesa ya está cerrada');
-    }
-    if (evento.participantes.length < 2) {
+    if (participantes.length < 2) {
       throw new HttpError(400, 'La mesa necesita al menos 2 participantes para liquidar');
     }
 
-    const { deudores, acreedores } = calcularBalances(evento.participantes);
+    const { deudores, acreedores } = calcularBalances(participantes);
     const transferencias = flujoMinimoEfectivo(deudores, acreedores);
 
     // Todo dentro de una transacción atómica (regla de negocio #2)

@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../config/prisma.js';
 import { HttpError } from '../middlewares/errorHandler.js';
+import { assertParamId } from '../middlewares/assertParamId.js';
 import { Prisma } from '@prisma/client';
 import { crearUsuarioSchema } from '../validators/schemas.js';
 
@@ -41,11 +42,7 @@ export const crearUsuario = async (req: Request, res: Response, next: NextFuncti
 // El OR no duplica eventos: si es creador Y participante, sale una sola vez.
 export const obtenerEventosDeUsuario = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id: usuarioId } = req.params;
-
-    if (typeof usuarioId !== 'string' || usuarioId.length === 0) {
-      throw new HttpError(400, 'Falta el id del usuario');
-    }
+    const usuarioId = assertParamId(req.params.id, 'usuario');
 
     const usuario = await prisma.usuario.findUnique({
       where: { id: usuarioId },

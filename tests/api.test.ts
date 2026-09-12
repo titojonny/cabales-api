@@ -59,6 +59,24 @@ describe('Flujo relacional de Cabales', () => {
     expect(res.status).toBe(404);
     expect(res.body.success).toBe(false);
   });
+
+  it('permite peticiones CORS desde Angular (http://localhost:4200)', async () => {
+    const res = await request(app)
+      .options('/api/health')
+      .set('Origin', 'http://localhost:4200')
+      .set('Access-Control-Request-Method', 'GET');
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:4200');
+  });
+
+  it('permite peticiones CORS desde Ionic/Capacitor (capacitor://localhost)', async () => {
+    const res = await request(app)
+      .options('/api/health')
+      .set('Origin', 'capacitor://localhost')
+      .set('Access-Control-Request-Method', 'GET');
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-origin']).toBe('capacitor://localhost');
+  });
 });
 
 afterAll(async () => {

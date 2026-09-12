@@ -11,24 +11,10 @@ type CuerpoConsumo = z.infer<typeof crearConsumoSchema>;
 // a los participantes y al total del evento. Todo en una transacción atómica.
 export const registrarConsumo = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { id: rutaId } = req.params;
+    const evento_id = req.evento!.id;
     const { descripcion, monto_centavos, participante_ids } = req.body as CuerpoConsumo;
 
-    if (typeof rutaId !== 'string' || rutaId.length === 0) {
-      throw new HttpError(400, 'Falta el id del evento');
-    }
-    const evento_id = rutaId;
-
-    // 1. El evento debe existir y no estar cerrado
-    const evento = await prisma.evento.findUnique({ where: { id: evento_id } });
-    if (!evento) {
-      throw new HttpError(404, 'El evento no existe');
-    }
-    if (evento.estado === 'CERRADO') {
-      throw new HttpError(409, 'No puedes registrar consumos en una cuenta cerrada');
-    }
-
-    // 2. Sin participantes duplicados en el mismo consumo
+    // 1. Sin participantes duplicados en el mismo consumo
     const idsUnicos = [...new Set(participante_ids)];
     if (idsUnicos.length !== participante_ids.length) {
       throw new HttpError(400, 'No puedes enviar el mismo participante dos veces');
