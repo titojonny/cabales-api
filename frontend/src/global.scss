@@ -1,0 +1,107 @@
+/* Cabales Design Tokens */
+@use "./theme/variables.scss";
+
+/* Core CSS required for Ionic components to work properly */
+@import "@ionic/angular/css/core.css";
+
+/* Basic CSS for apps built with Ionic */
+@import "@ionic/angular/css/normalize.css";
+@import "@ionic/angular/css/structure.css";
+@import "@ionic/angular/css/typography.css";
+@import "@ionic/angular/css/display.css";
+
+/* Optional CSS utils */
+@import "@ionic/angular/css/padding.css";
+@import "@ionic/angular/css/float-elements.css";
+@import "@ionic/angular/css/text-alignment.css";
+@import "@ionic/angular/css/text-transformation.css";
+@import "@ionic/angular/css/flex-utils.css";
+
+/* Dark Palette Always */
+@import "@ionic/angular/css/palettes/dark.always.css";
+
+* {
+  font-family: var(--font-family-base);
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--ion-background-color);
+  color: var(--ion-text-color);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Números tabulares para que las cifras de dinero se alineen perfectamente */
+.tabular-nums, .money-amount {
+  font-variant-numeric: tabular-nums;
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Glassmorphism Cards */
+.cabales-glass-card {
+  background: var(--cabales-glass-bg) !important;
+  backdrop-filter: var(--cabales-glass-blur);
+  -webkit-backdrop-filter: var(--cabales-glass-blur);
+  border: var(--cabales-card-border);
+  box-shadow: var(--cabales-card-shadow);
+  border-radius: 20px;
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  &:active {
+    transform: scale(0.985);
+  }
+}
+
+/* Gradient Hero Container */
+.cabales-hero-gradient {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(99, 102, 241, 0.12) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 24px;
+}
+
+/* Status Badges */
+.badge-pendiente {
+  --background: rgba(245, 158, 11, 0.15);
+  --color: #FBBF24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-revision {
+  --background: rgba(59, 130, 246, 0.15);
+  --color: #60A5FA;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.badge-completado {
+  --background: rgba(16, 185, 129, 0.15);
+  --color: #34D399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-disputa {
+  --background: rgba(239, 68, 68, 0.15);
+  --color: #F87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* Floating Action Button Styling */
+ion-fab-button {
+  --background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  --color: #ffffff;
+  --box-shadow: 0 8px 20px rgba(16, 185, 129, 0.35);
+}
+
+/* Modern Input Fields */
+ion-item.cabales-input-item {
+  --background: rgba(255, 255, 255, 0.04);
+  --border-radius: 14px;
+  --border-color: rgba(255, 255, 255, 0.08);
+  margin-bottom: 12px;
+
+  &.item-has-focus {
+    --border-color: var(--ion-color-primary);
+  }
+}

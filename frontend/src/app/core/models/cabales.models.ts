@@ -1,0 +1,145 @@
+/**
+ * Modelos de Dominio y Contratos de Cabales API para el cliente frontend.
+ */
+
+export type EstadoEvento = 'ACTIVO' | 'CERRADO';
+
+export type EstadoTransaccion = 'PENDIENTE' | 'EN_REVISION' | 'EN_DISPUTA' | 'COMPLETADO';
+
+export interface ApiResponse<T> {
+  success: true;
+  message: string;
+  data: T;
+}
+
+export interface ApiErrorResponse {
+  success: false;
+  message: string;
+  error?: string | string[];
+}
+
+export interface UsuarioDTO {
+  id: string;
+  nombre: string;
+  email: string;
+  avatar_url?: string | null;
+  fecha_registro?: string | Date;
+}
+
+export interface CrearUsuarioDTO {
+  nombre: string;
+  email: string;
+}
+
+export interface EventoUsuarioItemDTO {
+  id: string;
+  nombre: string;
+  estado: EstadoEvento;
+  fecha: string;
+  total_gastado_centavos: number;
+  numero_comensales: number;
+  es_creador: boolean;
+  creador: {
+    id: string;
+    nombre: string;
+  };
+}
+
+export interface EventoDTO {
+  id: string;
+  nombre: string;
+  creador_id: string;
+  fecha: string | Date;
+  estado: EstadoEvento;
+}
+
+export interface ParticipanteDetalleDTO {
+  id: string;
+  nombre_visible: string;
+  es_fantasma: boolean;
+  usuario_id: string | null;
+  monto_consumido_centavos: number;
+  monto_pagado_centavos: number;
+}
+
+export interface EventoDetalleDTO {
+  id: string;
+  nombre: string;
+  fecha: string;
+  estado: EstadoEvento;
+  total_gastado_centavos: number;
+  numero_comensales: number;
+  numero_transacciones: number;
+  creador: {
+    id: string;
+    nombre: string;
+    avatar_url: string | null;
+  };
+  participantes: ParticipanteDetalleDTO[];
+}
+
+export interface ParticipanteDTO {
+  id: string;
+  evento_id: string;
+  usuario_id: string | null;
+  nombre_invitado: string | null;
+  monto_consumido_centavos: number;
+  monto_pagado_centavos: number;
+}
+
+export interface AgregarParticipanteDTO {
+  usuario_id?: string;
+  nombre_invitado?: string;
+}
+
+export interface CrearConsumoDTO {
+  descripcion?: string;
+  monto_centavos: number;
+  participante_ids: string[];
+}
+
+export interface ConsumoRegistradoDTO {
+  descripcion: string | null;
+  monto_centavos: number;
+  repartido: number[];
+}
+
+export interface RegistrarPagoDTO {
+  participante_id: string;
+  monto_centavos: number;
+}
+
+export interface ParticipanteTransaccionDTO {
+  id: string;
+  nombre_visible: string;
+  avatar_url?: string | null;
+}
+
+export interface TransaccionDTO {
+  id: string;
+  evento_id: string;
+  monto_centavos: number;
+  estado: EstadoTransaccion;
+  comprobante_url: string | null;
+  fecha_limite: string | null;
+  creado_en: string;
+  actualizado_en: string;
+  deudor: ParticipanteTransaccionDTO;
+  acreedor: ParticipanteTransaccionDTO;
+}
+
+export interface ActualizarEstadoTransaccionDTO {
+  estado: EstadoTransaccion;
+  comprobante_url?: string;
+}
+
+export interface TransferenciaCalculadaDTO {
+  deudorId: string;
+  acreedorId: string;
+  monto_centavos: number;
+}
+
+export interface CierreMesaDTO {
+  evento: EventoDetalleDTO | null;
+  transacciones: TransferenciaCalculadaDTO[];
+}
