@@ -1,0 +1,49 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cabales_api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/data/dev.db
+    volumes:
+      - cabales_uploads:/app/uploads
+      - cabales_data:/app/data
+
+  # -------------------------------------------------------------
+  # CONFIGURACIÓN FUTURA PARA POSTGRESQL (CUANDO DESEES DAR EL SALTO):
+  # -------------------------------------------------------------
+  # Para cambiar a PostgreSQL:
+  # 1. Descomenta el servicio 'db' de abajo.
+  # 2. En el servicio 'api' cambia:
+  #      DATABASE_URL=postgresql://cabales_user:cabales_secret@db:5432/cabales_db?schema=public
+  #    Y añade:
+  #      depends_on:
+  #        - db
+  # 3. Cambia provider = "postgresql" en prisma/schema.prisma
+  #
+  # db:
+  #   image: postgres:16-alpine
+  #   container_name: cabales_db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: cabales_user
+  #     POSTGRES_PASSWORD: cabales_secret
+  #     POSTGRES_DB: cabales_db
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - cabales_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  cabales_uploads:
+    name: cabales_uploads
+  cabales_data:
+    name: cabales_data
+  # cabales_postgres_data:
+  #   name: cabales_postgres_data
