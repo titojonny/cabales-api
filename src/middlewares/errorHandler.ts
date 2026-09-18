@@ -41,6 +41,16 @@ export function errorHandler(error: unknown, req: Request, res: Response, next: 
     return;
   }
 
+  if (error && typeof error === 'object' && 'name' in error && error.name === 'MulterError') {
+    const multerError = error as { code: string; message: string };
+    const mensaje =
+      multerError.code === 'LIMIT_FILE_SIZE'
+        ? 'El archivo supera el tamaño máximo permitido (10MB)'
+        : multerError.message || 'Error al procesar el archivo';
+    res.status(400).json({ success: false, message: mensaje });
+    return;
+  }
+
   console.error('Error interno:', error);
   const mensaje =
     process.env.NODE_ENV === 'production'

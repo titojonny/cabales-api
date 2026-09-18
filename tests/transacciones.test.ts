@@ -210,6 +210,42 @@ describe('PATCH /api/transactions/:id/status — EN_DISPUTA y bordes', () => {
   });
 });
 
+describe('POST /api/transactions/:id/comprobante', () => {
+  it('sube archivo de imagen exitosamente y pasa a EN_REVISION (200)', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    const imagenFalsa = Buffer.from('fake-png-content');
+
+    const res = await request(app)
+      .post(`/api/transactions/${txId}/comprobante`)
+      .attach('comprobante', imagenFalsa, 'captura_transferencia.png');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.estado).toBe('EN_REVISION');
+    expect(res.body.data.comprobante_url).toMatch(/^\/uploads\/comprobantes\/proof-/);
+    expect(res.body.data.fecha_limite).toBeDefined();
+  });
+
+  it('falla con 400 si no se adjunta archivo', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    const res = await request(app).post(`/api/transactions/${txId}/comprobante`);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/adjuntar un archivo/i);
+  });
+
+  it('falla con 400 si se sube un archivo que no es imagen', async () => {
+    const txId = await crearTransaccionAislada(usuarioId);
+    const txtFalso = Buffer.from('archivo de texto no permitido');
+
+    const res = await request(app)
+      .post(`/api/transactions/${txId}/comprobante`)
+      .attach('comprobante', txtFalso, 'documento.pdf');
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/solo se permiten imágenes/i);
+  });
+});
+
 afterAll(async () => {
   const eventosDelUsuario = await prisma.evento.findMany({ where: { creador_id: usuarioId }, select: { id: true } });
   const ids = eventosDelUsuario.map((e) => e.id);

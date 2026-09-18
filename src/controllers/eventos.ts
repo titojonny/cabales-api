@@ -22,7 +22,7 @@ export const crearEvento = async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const { nombre, creador_id } = parse.data;
+    const { nombre, creador_id, auto_incluir_creador } = parse.data;
 
     const creador = await prisma.usuario.findUnique({ where: { id: creador_id } });
     if (!creador) {
@@ -30,7 +30,17 @@ export const crearEvento = async (req: Request, res: Response, next: NextFunctio
     }
 
     const nuevoEvento = await prisma.evento.create({
-      data: { nombre, creador_id }
+      data: {
+        nombre,
+        creador_id,
+        participantes: auto_incluir_creador
+          ? {
+              create: {
+                usuario_id: creador_id
+              }
+            }
+          : undefined
+      }
     });
 
     res.status(201).json({ success: true, message: '¡Salida creada!', data: nuevoEvento });
@@ -57,6 +67,15 @@ export const obtenerEventoDetalle = async (req: Request, res: Response, next: Ne
           orderBy: { monto_consumido_centavos: 'desc' },
           include: { usuario: { select: { id: true, nombre: true, avatar_url: true } } }
         },
+        transacciones: {
+          select: {
+            id: true,
+            deudor_id: true,
+            acreedor_id: true,
+            monto_centavos: true,
+            estado: true
+          }
+        },
         _count: { select: { participantes: true, transacciones: true } }
       }
     });
@@ -64,6 +83,11 @@ export const obtenerEventoDetalle = async (req: Request, res: Response, next: Ne
     if (!evento) {
       throw new HttpError(404, 'El evento no existe');
     }
+
+    const totalTx = evento.transacciones.length;
+    const completadasTx = evento.transacciones.filter((t) => t.estado === 'COMPLETADO').length;
+    const estaTotalmenteSaldado =
+      evento.estado === 'CERRADO' && (totalTx === 0 || completadasTx === totalTx);
 
     const data = {
       id: evento.id,
@@ -73,15 +97,39 @@ export const obtenerEventoDetalle = async (req: Request, res: Response, next: Ne
       total_gastado_centavos: evento.total_gastado_centavos,
       numero_comensales: evento._count.participantes,
       numero_transacciones: evento._count.transacciones,
+      total_transacciones: totalTx,
+      transacciones_completadas: completadasTx,
+      transacciones_pendientes: totalTx - completadasTx,
+      esta_totalmente_saldado: estaTotalmenteSaldado,
       creador: evento.creador,
-      participantes: evento.participantes.map((participante) => ({
-        id: participante.id,
-        nombre_visible: participante.usuario?.nombre ?? participante.nombre_invitado,
-        es_fantasma: !participante.usuario,
-        usuario_id: participante.usuario_id,
-        monto_consumido_centavos: participante.monto_consumido_centavos,
-        monto_pagado_centavos: participante.monto_pagado_centavos
-      }))
+      transacciones: evento.transacciones,
+      participantes: evento.participantes.map((participante) => {
+        const txsDeudor = evento.transacciones.filter((t) => t.deudor_id === participante.id);
+        const txsAcreedor = evento.transacciones.filter((t) => t.acreedor_id === participante.id);
+        const deudaPendiente = txsDeudor
+          .filter((t) => t.estado !== 'COMPLETADO')
+          .reduce((acc, t) => acc + t.monto_centavos, 0);
+        const porCobrarPendiente = txsAcreedor
+          .filter((t) => t.estado !== 'COMPLETADO')
+          .reduce((acc, t) => acc + t.monto_centavos, 0);
+        const deudaSaldada = txsDeudor
+          .filter((t) => t.estado === 'COMPLETADO')
+          .reduce((acc, t) => acc + t.monto_centavos, 0);
+
+        return {
+          id: participante.id,
+          nombre_visible: participante.usuario?.nombre ?? participante.nombre_invitado,
+          es_fantasma: !participante.usuario,
+          usuario_id: participante.usuario_id,
+          monto_consumido_centavos: participante.monto_consumido_centavos,
+          monto_pagado_centavos: participante.monto_pagado_centavos,
+          deuda_pendiente_centavos: deudaPendiente,
+          por_cobrar_pendiente_centavos: porCobrarPendiente,
+          deuda_saldada_centavos: deudaSaldada,
+          esta_saldado:
+            evento.estado === 'CERRADO' && deudaPendiente === 0 && porCobrarPendiente === 0
+        };
+      })
     };
 
     res.status(200).json({ success: true, message: 'Evento obtenido', data });

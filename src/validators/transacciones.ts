@@ -9,7 +9,20 @@ export const actualizarEstadoTransaccionSchema = z
     estado: z.enum(['PENDIENTE', 'EN_REVISION', 'EN_DISPUTA', 'COMPLETADO'], {
       message: 'El estado debe ser PENDIENTE, EN_REVISION, EN_DISPUTA o COMPLETADO'
     }),
-    comprobante_url: z.string().url('El comprobante debe ser una URL válida').optional()
+    comprobante_url: z
+      .string()
+      .refine(
+        (val) => {
+          try {
+            new URL(val);
+            return true;
+          } catch {
+            return val.startsWith('/uploads/');
+          }
+        },
+        { message: 'El comprobante debe ser una URL válida o ruta válida (/uploads/...)' }
+      )
+      .optional()
   })
   .refine((data) => data.estado !== 'EN_REVISION' || !!data.comprobante_url, {
     message: 'EN_REVISION requiere comprobante_url',

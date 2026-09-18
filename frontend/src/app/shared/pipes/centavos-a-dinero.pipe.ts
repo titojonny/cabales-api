@@ -19,6 +19,14 @@ export class CentavosADineroPipe implements PipeTransform {
 
     const dolares = centavos / 100;
 
+    if (!currency || currency.trim() === '') {
+      return new Intl.NumberFormat(locale, {
+        style: 'decimal',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(dolares);
+    }
+
     return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency,

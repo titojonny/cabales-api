@@ -18,8 +18,8 @@ import {
   IonSegment,
   IonSegmentButton,
   IonLabel,
-  AlertController,
-  ToastController
+  ToastController,
+  ViewWillEnter
 } from '@ionic/angular';
 import { addIcons } from 'ionicons';
 import {
@@ -33,14 +33,20 @@ import {
   shieldCheckmarkOutline,
   arrowForwardOutline,
   alertCircleOutline,
-  cashOutline
+  cashOutline,
+  walletOutline,
+  receiptOutline,
+  warningOutline,
+  sparklesOutline,
+  swapHorizontalOutline,
+  checkmarkDoneOutline,
+  addOutline
 } from 'ionicons/icons';
 import { CabalesApiService } from '../../core/services/cabales-api.service';
 import { AuthService } from '../../core/services/auth.service';
-import { EventoDetalleDTO, ParticipanteDetalleDTO } from '../../core/models/cabales.models';
+import { EventoDetalleDTO, ParticipanteDetalleDTO, CerrarMesaBodyDTO } from '../../core/models/cabales.models';
 import { CentavosADineroPipe } from '../../shared/pipes/centavos-a-dinero.pipe';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
-import { ParticipantBadgeComponent } from '../../shared/components/participant-badge/participant-badge.component';
 import { MoneyInputComponent } from '../../shared/components/money-input/money-input.component';
 
 @Component({
@@ -66,7 +72,6 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     IonLabel,
     CentavosADineroPipe,
     StatusBadgeComponent,
-    ParticipantBadgeComponent,
     MoneyInputComponent
   ],
   template: `
@@ -91,28 +96,67 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
           <p>Cargando radiografía de la mesa...</p>
         </div>
       } @else if (evento(); as ev) {
-        <!-- Hero Bill Card -->
-        <div class="hero-mesa-card">
+        <!-- HERO CARD DE CONCILIACIÓN FINANCIERA -->
+        <div class="hero-recon-card">
           <div class="hero-top-row">
-            <span class="hero-label">Total Consumido en la Mesa</span>
+            <div class="hero-event-info">
+              <span class="hero-label">Radiografía de Mesa</span>
+              <span class="hero-organizer">Por {{ ev.creador.nombre }} • {{ ev.fecha | date:'d MMM y' }}</span>
+            </div>
             <span class="hero-comensales-pill">
               <ion-icon name="people-outline"></ion-icon>
               {{ ev.numero_comensales }} comensales
             </span>
           </div>
-          <div class="hero-amount tabular-nums">
-            {{ ev.total_gastado_centavos | centavosADinero }}
+
+          <!-- Tablero de 3 Cifras Financieras -->
+          <div class="fintech-metrics-grid">
+            <div class="metric-block">
+              <span class="metric-caption">Consumo Total</span>
+              <span class="metric-value tabular-nums">{{ ev.total_gastado_centavos | centavosADinero }}</span>
+            </div>
+            <div class="metric-block">
+              <span class="metric-caption">Abonado al Local</span>
+              <span class="metric-value text-emerald tabular-nums">{{ totalPagadoCentavos() | centavosADinero }}</span>
+            </div>
+            <div class="metric-block">
+              <span class="metric-caption">Estado Factura</span>
+              @if (isFacturaCubierta()) {
+                <span class="status-pill-covered">
+                  <ion-icon name="checkmark-circle-outline"></ion-icon> 100% Cubierta
+                </span>
+              } @else if (saldoPendienteCentavos() > 0) {
+                <span class="status-pill-pending">
+                  <ion-icon name="warning-outline"></ion-icon> Faltan {{ saldoPendienteCentavos() | centavosADinero }}
+                </span>
+              } @else {
+                <span class="status-pill-neutral">Sin consumos</span>
+              }
+            </div>
           </div>
-          <div class="hero-footer-row">
-            <span class="hero-organizer">Organizado por {{ ev.creador.nombre }}</span>
-            <span class="hero-date">{{ ev.fecha | date:'d MMMM, y' }}</span>
+
+          <!-- Barra Visual de Conciliación -->
+          <div class="recon-bar-container">
+            <div class="recon-bar-track">
+              <div
+                class="recon-bar-fill"
+                [style.width.%]="porcentajeCubierto()"
+                [class.bar-full]="isFacturaCubierta()"
+              ></div>
+            </div>
+            <div class="recon-bar-labels">
+              <span>{{ porcentajeCubierto() }}% cubierto ante el restaurante</span>
+              <span>{{ isFacturaCubierta() ? '✓ Cuenta equilibrada' : 'Abono pendiente' }}</span>
+            </div>
           </div>
 
           @if (ev.estado === 'CERRADO') {
             <div class="settlement-cta-banner">
               <div class="cta-info">
                 <ion-icon name="shield-checkmark-outline"></ion-icon>
-                <span>Mesa liquidada y protegida</span>
+                <span>
+                  {{ ev.esta_totalmente_saldado ? '✓ Mesa 100% saldada (Todos cabales)' : 'Mesa liquidada y saldos protegidos' }}
+                </span>
               </div>
               <button class="cta-btn" (click)="goToSettlement()">
                 Ver Deudas y Cobros
@@ -122,12 +166,12 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
           }
         </div>
 
-        <!-- Radiografía de Consumo (Ranking) -->
+        <!-- SECCIÓN DE COMENSALES Y BALANCES EN VIVO -->
         <div class="section-container">
           <div class="section-header">
             <div>
-              <h2 class="section-title">Radiografía de Consumo</h2>
-              <p class="section-subtitle">Quién consumió más en la mesa (orden descendente)</p>
+              <h2 class="section-title">Comensales & Balances</h2>
+              <p class="section-subtitle">Monitorea quién debe y quién tiene saldo a favor en vivo</p>
             </div>
             @if (ev.estado === 'ACTIVO') {
               <button class="small-add-btn" (click)="openAddParticipantModal()">
@@ -145,61 +189,113 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
               </ion-button>
             </div>
           } @else {
-            <div class="participants-list">
+            <div class="participants-grid">
               @for (p of ev.participantes; track p.id; let idx = $index) {
-                <div class="participant-card">
-                  <div class="p-card-header">
-                    <div class="p-info-left">
-                      <span class="p-rank">#{{ idx + 1 }}</span>
-                      <app-participant-badge
-                        [name]="p.nombre_visible"
-                        [isGhost]="p.es_fantasma"
-                      ></app-participant-badge>
+                <div class="participant-balance-card"
+                  [class.is-debtor]="ev.estado === 'CERRADO' ? (!p.esta_saldado && (p.deuda_pendiente_centavos ?? 0) > 0) : (p.monto_consumido_centavos > p.monto_pagado_centavos)"
+                  [class.is-creditor]="ev.estado === 'CERRADO' ? (!p.esta_saldado && (p.por_cobrar_pendiente_centavos ?? 0) > 0) : (p.monto_pagado_centavos > p.monto_consumido_centavos)"
+                >
+                  <div class="p-card-main-row">
+                    <!-- Avatar & Info Izquierda -->
+                    <div class="p-identity">
+                      <div
+                        class="p-avatar-circle"
+                        [class.avatar-debt]="ev.estado === 'CERRADO' ? (!p.esta_saldado && (p.deuda_pendiente_centavos ?? 0) > 0) : (p.monto_consumido_centavos > p.monto_pagado_centavos)"
+                        [class.avatar-credit]="ev.estado === 'CERRADO' ? (p.esta_saldado || (p.por_cobrar_pendiente_centavos ?? 0) > 0) : (p.monto_pagado_centavos > p.monto_consumido_centavos)"
+                        [class.avatar-neutral]="ev.estado === 'CERRADO' ? p.esta_saldado : (p.monto_consumido_centavos === p.monto_pagado_centavos)"
+                      >
+                        {{ p.es_fantasma ? '👻' : p.nombre_visible.charAt(0).toUpperCase() }}
+                      </div>
+                      <div class="p-text-group">
+                        <div class="p-name-row">
+                          <span class="p-name">
+                            @if (p.usuario_id === auth.currentUserId()) {
+                              Tú ({{ p.nombre_visible }})
+                            } @else {
+                              {{ p.nombre_visible }}
+                            }
+                          </span>
+                          @if (p.usuario_id === ev.creador.id) {
+                            <span class="organizer-badge">Organizador</span>
+                          }
+                          @if (p.es_fantasma) {
+                            <span class="ghost-badge">Invitado</span>
+                          }
+                        </div>
+                        <div class="p-breakdown">
+                          <span>Consumió: <strong>{{ p.monto_consumido_centavos | centavosADinero }}</strong></span>
+                          <span class="bullet">•</span>
+                          <span>Abonó: <strong>{{ p.monto_pagado_centavos | centavosADinero }}</strong></span>
+                        </div>
+                      </div>
                     </div>
-                    <div class="p-amounts-right">
-                      <span class="p-consumed tabular-nums">
-                        {{ p.monto_consumido_centavos | centavosADinero }}
-                      </span>
-                      @if (p.monto_pagado_centavos > 0) {
-                        <span class="p-paid tabular-nums">
-                          Puso: {{ p.monto_pagado_centavos | centavosADinero }}
-                        </span>
+
+                    <!-- Badge de Balance Neto a la Derecha -->
+                    <div class="p-net-balance">
+                      @if (ev.estado === 'CERRADO') {
+                        @if (p.esta_saldado) {
+                          <span class="balance-pill credit">✓ Saldado</span>
+                        } @else if ((p.deuda_pendiente_centavos ?? 0) > 0) {
+                          <span class="balance-pill debt">
+                            🔴 Debe {{ p.deuda_pendiente_centavos | centavosADinero }}
+                          </span>
+                        } @else if ((p.por_cobrar_pendiente_centavos ?? 0) > 0) {
+                          <span class="balance-pill credit">
+                            🟢 +{{ p.por_cobrar_pendiente_centavos | centavosADinero }} a favor
+                          </span>
+                        } @else {
+                          <span class="balance-pill credit">✓ Cabal</span>
+                        }
+                      } @else {
+                        @if (p.monto_consumido_centavos > p.monto_pagado_centavos) {
+                          <span class="balance-pill debt">
+                            🔴 Debe {{ (p.monto_consumido_centavos - p.monto_pagado_centavos) | centavosADinero }}
+                          </span>
+                        } @else if (p.monto_pagado_centavos > p.monto_consumido_centavos) {
+                          <span class="balance-pill credit">
+                            🟢 +{{ (p.monto_pagado_centavos - p.monto_consumido_centavos) | centavosADinero }} a favor
+                          </span>
+                        } @else {
+                          <span class="balance-pill neutral">
+                            ⚪ Cabal ($0.00)
+                          </span>
+                        }
                       }
                     </div>
                   </div>
 
-                  <!-- Visual Progress Bar -->
-                  <div class="progress-container">
-                    <div
-                      class="progress-bar-fill"
-                      [style.width.%]="getConsumptionPercentage(p.monto_consumido_centavos, ev.total_gastado_centavos)"
-                    ></div>
-                  </div>
-                  <div class="progress-label">
-                    <span>{{ getConsumptionPercentage(p.monto_consumido_centavos, ev.total_gastado_centavos) }}% del total</span>
-                    @if (p.monto_pagado_centavos > 0) {
-                      <span class="paid-indicator">✓ Pago registrado</span>
-                    }
-                  </div>
+                  <!-- Fila de Acciones Rápidas del Comensal -->
+                  @if (ev.estado === 'ACTIVO') {
+                    <div class="p-quick-actions">
+                      <button type="button" class="quick-action-btn" (click)="quickAbonoFor(p.id)">
+                        <ion-icon name="card-outline"></ion-icon>
+                        <span>+ Abonar</span>
+                      </button>
+                      <button type="button" class="quick-action-btn" (click)="quickConsumoFor(p.id)">
+                        <ion-icon name="restaurant-outline"></ion-icon>
+                        <span>+ Consumo</span>
+                      </button>
+                    </div>
+                  }
                 </div>
               }
             </div>
           }
         </div>
 
-        <!-- Bottom Action Floating Bar for Open Events -->
+        <!-- BARRA FLOTANTE DE ACCIONES INFERIOR (DOCK) -->
         @if (ev.estado === 'ACTIVO') {
-          <div class="bottom-action-bar">
-            <div class="action-buttons-row">
-              <button class="action-btn btn-secondary" (click)="openConsumptionModal()">
+          <div class="floating-dock-container">
+            <div class="dock-pill">
+              <button class="dock-action-btn btn-consume" (click)="openConsumptionModal()">
                 <ion-icon name="restaurant-outline"></ion-icon>
                 <span>+ Consumo</span>
               </button>
-              <button class="action-btn btn-secondary" (click)="openPaymentModal()">
+              <button class="dock-action-btn btn-payment" (click)="openPaymentModal()">
                 <ion-icon name="card-outline"></ion-icon>
-                <span>+ Pago</span>
+                <span>+ Abono</span>
               </button>
-              <button class="action-btn btn-primary" (click)="confirmCloseTable()">
+              <button class="dock-action-btn btn-close" (click)="openCloseAssistant()">
                 <ion-icon name="cash-outline"></ion-icon>
                 <span>Liquidar</span>
               </button>
@@ -207,6 +303,125 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
           </div>
         }
       }
+
+      <!-- MODAL: ASISTENTE DE CIERRE INTELIGENTE (SIN CIERRES EN FALSO) -->
+      <ion-modal [isOpen]="isCloseAssistantOpen()" (didDismiss)="closeCloseAssistant()">
+        <ng-template>
+          <div class="modal-wrapper assistant-modal">
+            <div class="modal-header">
+              <div class="assistant-header-text">
+                <h2>Liquidar y Cerrar Mesa</h2>
+                <span class="assistant-sub">Asistente de conciliación y flujo de deudas</span>
+              </div>
+              <button class="close-btn" (click)="closeCloseAssistant()">✕</button>
+            </div>
+
+            <div class="modal-body">
+              @if (saldoPendienteCentavos() > 0) {
+                <!-- Caso: Faltan pagos por registrar al restaurante -->
+                <div class="unsettled-notice-box">
+                  <div class="notice-icon-box">
+                    <ion-icon name="alert-circle-outline"></ion-icon>
+                  </div>
+                  <div class="notice-info">
+                    <h3>Falta registrar quién pagó la cuenta</h3>
+                    <p>
+                      Se consumieron <strong>{{ totalConsumidoCentavos() | centavosADinero }}</strong>, pero solo se han registrado <strong>{{ totalPagadoCentavos() | centavosADinero }}</strong> abonados a la cuenta.
+                      Faltan <strong>{{ saldoPendienteCentavos() | centavosADinero }}</strong> por cubrir.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="prompt-section">
+                  <span class="prompt-title">¿Quién cubrió los {{ saldoPendienteCentavos() | centavosADinero }} restantes al restaurante?</span>
+
+                  <!-- Opción Rápida: El Organizador pagó todo -->
+                  <div
+                    class="assistant-choice-card"
+                    [class.is-selected]="closePayerId() === organizadorParticipante()?.id"
+                    (click)="closePayerId.set(organizadorParticipante()?.id || '')"
+                  >
+                    <div class="choice-icon">💳</div>
+                    <div class="choice-text">
+                      <span class="choice-heading">Yo pagué con mi tarjeta (Organizador)</span>
+                      <span class="choice-desc">El sistema registrará que cubriste el saldo restante y tus amigos te deberán a ti.</span>
+                    </div>
+                  </div>
+
+                  <!-- Opción: Otro Amigo Pagó la Cuenta -->
+                  <div class="other-payers-section">
+                    <span class="other-payers-label">O selecciona quién cubrió la cuenta con el restaurante:</span>
+                    <div class="chips-container">
+                      @for (p of evento()?.participantes || []; track p.id) {
+                        <button
+                          type="button"
+                          class="person-toggle-chip"
+                          [class.is-selected]="closePayerId() === p.id"
+                          (click)="closePayerId.set(p.id)"
+                        >
+                          <span class="chip-avatar">{{ p.es_fantasma ? '👻' : p.nombre_visible.charAt(0) }}</span>
+                          <span class="chip-name">
+                            {{ p.usuario_id === auth.currentUserId() ? 'Yo (' + p.nombre_visible + ')' : p.nombre_visible }}
+                          </span>
+                        </button>
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                <div class="modal-actions">
+                  <ion-button
+                    expand="block"
+                    color="primary"
+                    shape="round"
+                    [disabled]="isClosingTable() || !closePayerId()"
+                    (click)="submitCloseTable()"
+                  >
+                    @if (isClosingTable()) {
+                      <ion-spinner name="dots"></ion-spinner>
+                    } @else {
+                      Liquidar Mesa y Generar Deudas
+                    }
+                  </ion-button>
+                  <button type="button" class="cancel-link-btn" (click)="closeCloseAssistant()">
+                    Volver a la mesa para registrar abonos parciales
+                  </button>
+                </div>
+              } @else {
+                <!-- Caso: Factura 100% Cuadrada -->
+                <div class="settled-notice-box">
+                  <div class="settled-icon-box">
+                    <ion-icon name="shield-checkmark-outline"></ion-icon>
+                  </div>
+                  <h3>¡Cuenta 100% Cubierta!</h3>
+                  <p>
+                    El total de la mesa ({{ totalConsumidoCentavos() | centavosADinero }}) coincide con los abonos registrados ante el restaurante.
+                  </p>
+                  <p class="settled-helper">
+                    Al confirmar, la mesa se cerrará y el motor matemático calculará las transferencias exactas entre comensales.
+                  </p>
+                </div>
+
+                <div class="modal-actions">
+                  <ion-button
+                    expand="block"
+                    color="primary"
+                    shape="round"
+                    [disabled]="isClosingTable()"
+                    (click)="submitCloseTable()"
+                  >
+                    @if (isClosingTable()) {
+                      <ion-spinner name="dots"></ion-spinner>
+                    } @else {
+                      Confirmar y Liquidar Mesa
+                    }
+                  </ion-button>
+                </div>
+              }
+            </div>
+          </div>
+        </ng-template>
+      </ion-modal>
 
       <!-- MODAL: AGREGAR COMENSAL -->
       <ion-modal [isOpen]="isAddParticipantModalOpen()" (didDismiss)="closeAddParticipantModal()">
@@ -299,7 +514,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
                 (centavosChange)="consumptionCentavos.set($event)"
               ></app-money-input>
 
-              <!-- Participant Selection Chips -->
+              <!-- Selector de Comensales -->
               <div class="participants-selector-section">
                 <div class="selector-header">
                   <span class="selector-title">¿Quiénes consumieron de esto?</span>
@@ -317,7 +532,9 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
                       (click)="toggleParticipant(p.id)"
                     >
                       <span class="chip-avatar">{{ p.es_fantasma ? '👻' : p.nombre_visible.charAt(0) }}</span>
-                      <span class="chip-name">{{ p.nombre_visible }}</span>
+                      <span class="chip-name">
+                        {{ p.usuario_id === auth.currentUserId() ? 'Yo (' + p.nombre_visible + ')' : p.nombre_visible }}
+                      </span>
                     </button>
                   }
                 </div>
@@ -350,12 +567,12 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
         </ng-template>
       </ion-modal>
 
-      <!-- MODAL: REGISTRAR PAGO -->
+      <!-- MODAL: REGISTRAR ABONO / PAGO A LA FACTURA -->
       <ion-modal [isOpen]="isPaymentModalOpen()" (didDismiss)="closePaymentModal()">
         <ng-template>
           <div class="modal-wrapper">
             <div class="modal-header">
-              <h2>Registrar Pago a Factura</h2>
+              <h2>Registrar Abono a Factura</h2>
               <button class="close-btn" (click)="closePaymentModal()">✕</button>
             </div>
             <div class="modal-body">
@@ -363,9 +580,9 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
                 ¿Quién puso dinero físico o pasó tarjeta para pagarle al restaurante?
               </p>
 
-              <!-- Selector de comensal que pagó -->
+              <!-- Selector de comensal que abonó -->
               <div class="payer-selection-group">
-                <span class="selector-title">Selecciona quién pagó:</span>
+                <span class="selector-title">Selecciona quién puso el dinero:</span>
                 <div class="chips-container">
                   @for (p of evento()?.participantes || []; track p.id) {
                     <button
@@ -375,13 +592,15 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
                       (click)="selectedPayerId.set(p.id)"
                     >
                       <span class="chip-avatar">{{ p.es_fantasma ? '👻' : p.nombre_visible.charAt(0) }}</span>
-                      <span class="chip-name">{{ p.nombre_visible }}</span>
+                      <span class="chip-name">
+                        {{ p.usuario_id === auth.currentUserId() ? 'Yo (' + p.nombre_visible + ')' : p.nombre_visible }}
+                      </span>
                     </button>
                   }
                 </div>
               </div>
 
-              <!-- ATM Keypad para monto pagado -->
+              <!-- ATM Keypad para monto abonado -->
               <app-money-input
                 [initialCentavos]="paymentCentavos()"
                 (centavosChange)="paymentCentavos.set($event)"
@@ -398,7 +617,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
                   @if (isSavingPayment()) {
                     <ion-spinner name="dots"></ion-spinner>
                   } @else {
-                    Registrar Pago
+                    Registrar Abono
                   }
                 </ion-button>
               </div>
@@ -410,7 +629,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
   `,
   styles: [`
     .cabales-toolbar {
-      --background: #0B0F19;
+      --background: #080C14;
       padding: 4px 12px;
     }
 
@@ -422,7 +641,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     }
 
     .event-content {
-      --background: #0B0F19;
+      --background: #080C14;
       padding-bottom: 120px;
     }
 
@@ -432,28 +651,40 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       color: #94A3B8;
     }
 
-    .hero-mesa-card {
-      background: linear-gradient(135deg, rgba(16, 185, 129, 0.16) 0%, rgba(99, 102, 241, 0.16) 100%);
-      border: 1px solid rgba(16, 185, 129, 0.25);
+    /* HERO CARD DE CONCILIACIÓN FINANCIERA */
+    .hero-recon-card {
+      background: linear-gradient(145deg, rgba(16, 185, 129, 0.12) 0%, rgba(99, 102, 241, 0.14) 50%, rgba(14, 22, 38, 0.95) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 24px;
-      padding: 24px 20px;
-      margin: 12px 16px 24px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      padding: 22px 18px;
+      margin: 12px 16px 20px;
+      box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.7);
     }
 
     .hero-top-row {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    .hero-event-info {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
     }
 
     .hero-label {
-      font-size: 0.82rem;
+      font-size: 0.76rem;
       color: #94A3B8;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
+    }
+
+    .hero-organizer {
+      font-size: 0.8rem;
+      color: #CBD5E1;
     }
 
     .hero-comensales-pill {
@@ -461,33 +692,118 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       color: #E2E8F0;
       font-size: 0.75rem;
       font-weight: 600;
-      padding: 3px 10px;
+      padding: 4px 10px;
       border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .fintech-metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1.2fr;
+      gap: 10px;
+      background: rgba(8, 12, 20, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+
+    .metric-block {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .metric-caption {
+      font-size: 0.68rem;
+      color: #94A3B8;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+
+    .metric-value {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #FFFFFF;
+      line-height: 1.2;
+
+      &.text-emerald {
+        color: #34D399;
+      }
+    }
+
+    .status-pill-covered {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34D399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 3px 8px;
+      border-radius: 9999px;
+      font-size: 0.72rem;
+      font-weight: 700;
       display: inline-flex;
       align-items: center;
       gap: 4px;
     }
 
-    .hero-amount {
-      font-size: 3.2rem;
-      font-weight: 800;
-      color: #FFFFFF;
-      line-height: 1.1;
-      margin: 6px 0 10px;
-      letter-spacing: -0.03em;
+    .status-pill-pending {
+      background: rgba(244, 63, 94, 0.15);
+      color: #FB7185;
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      padding: 3px 8px;
+      border-radius: 9999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
 
-    .hero-footer-row {
+    .status-pill-neutral {
+      color: #94A3B8;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+
+    .recon-bar-container {
+      margin-top: 4px;
+    }
+
+    .recon-bar-track {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 9999px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+
+    .recon-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6366F1 0%, #10B981 100%);
+      border-radius: 9999px;
+      transition: width 0.4s ease;
+
+      &.bar-full {
+        background: #10B981;
+        box-shadow: 0 0 12px rgba(16, 185, 129, 0.5);
+      }
+    }
+
+    .recon-bar-labels {
       display: flex;
       justify-content: space-between;
-      font-size: 0.78rem;
+      font-size: 0.72rem;
       color: #94A3B8;
+      font-weight: 500;
     }
 
     .settlement-cta-banner {
-      margin-top: 18px;
-      padding-top: 16px;
-      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -498,7 +814,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       align-items: center;
       gap: 6px;
       color: #34D399;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 600;
     }
 
@@ -508,7 +824,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       border: none;
       padding: 8px 14px;
       border-radius: 9999px;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 700;
       display: flex;
       align-items: center;
@@ -516,27 +832,28 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       cursor: pointer;
     }
 
+    /* SECCIÓN DE COMENSALES */
     .section-container {
-      padding: 0 16px 120px;
+      padding: 0 16px 140px;
     }
 
     .section-header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
 
     .section-title {
       font-family: 'Outfit', sans-serif;
-      font-size: 1.25rem;
+      font-size: 1.2rem;
       font-weight: 700;
       color: #F8FAFC;
       margin: 0;
     }
 
     .section-subtitle {
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       color: #64748B;
       margin: 2px 0 0;
     }
@@ -545,7 +862,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       background: rgba(99, 102, 241, 0.15);
       border: 1px solid rgba(99, 102, 241, 0.3);
       color: #818CF8;
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       font-weight: 700;
       padding: 6px 12px;
       border-radius: 9999px;
@@ -557,194 +874,463 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     .empty-table-box {
       text-align: center;
-      padding: 30px 20px;
-      background: #151D30;
+      padding: 40px 20px;
+      background: #0E1626;
       border-radius: 20px;
+      border: 1px dashed rgba(255, 255, 255, 0.1);
       color: #94A3B8;
+      font-size: 0.9rem;
     }
 
-    .participants-list {
+    .participants-grid {
       display: flex;
       flex-direction: column;
       gap: 12px;
     }
 
-    .participant-card {
-      background: #151D30;
-      border: 1px solid rgba(255, 255, 255, 0.07);
+    .participant-balance-card {
+      background: #0E1626;
+      border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 18px;
-      padding: 16px;
+      padding: 14px 16px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      transition: transform 0.15s ease, border-color 0.2s ease;
+
+      &.is-debtor {
+        border-color: rgba(244, 63, 94, 0.22);
+      }
+
+      &.is-creditor {
+        border-color: rgba(16, 185, 129, 0.22);
+      }
     }
 
-    .p-card-header {
+    .p-card-main-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 10px;
+      gap: 10px;
     }
 
-    .p-info-left {
+    .p-identity {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
     }
 
-    .p-rank {
-      font-family: 'Outfit', sans-serif;
-      font-size: 0.9rem;
-      font-weight: 800;
-      color: #64748B;
-      width: 22px;
-    }
-
-    .p-amounts-right {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-    }
-
-    .p-consumed {
-      font-size: 1.15rem;
-      font-weight: 700;
-      color: #F8FAFC;
-    }
-
-    .p-paid {
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: #34D399;
-    }
-
-    .progress-container {
-      height: 6px;
-      background: rgba(255, 255, 255, 0.06);
-      border-radius: 9999px;
-      overflow: hidden;
-      margin-bottom: 6px;
-    }
-
-    .progress-bar-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #10B981 0%, #6366F1 100%);
-      border-radius: 9999px;
-      transition: width 0.3s ease;
-    }
-
-    .progress-label {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.72rem;
-      color: #64748B;
-    }
-
-    .paid-indicator {
-      color: #10B981;
-      font-weight: 600;
-    }
-
-    .bottom-action-bar {
-      position: fixed;
-      bottom: 20px;
-      left: 16px;
-      right: 16px;
-      background: rgba(15, 23, 42, 0.85);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 24px;
-      padding: 8px;
-      box-shadow: 0 12px 35px rgba(0, 0, 0, 0.6);
-      z-index: 999;
-    }
-
-    .action-buttons-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1.2fr;
-      gap: 8px;
-    }
-
-    .action-btn {
-      border: none;
-      height: 48px;
-      border-radius: 18px;
+    .p-avatar-circle {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+
+      &.avatar-debt {
+        background: rgba(244, 63, 94, 0.15);
+        color: #FB7185;
+        border: 2px solid rgba(244, 63, 94, 0.3);
+      }
+
+      &.avatar-credit {
+        background: rgba(16, 185, 129, 0.15);
+        color: #34D399;
+        border: 2px solid rgba(16, 185, 129, 0.3);
+      }
+
+      &.avatar-neutral {
+        background: rgba(148, 163, 184, 0.15);
+        color: #94A3B8;
+        border: 2px solid rgba(148, 163, 184, 0.3);
+      }
+    }
+
+    .p-text-group {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .p-name-row {
+      display: flex;
+      align-items: center;
       gap: 6px;
-      font-size: 0.85rem;
+    }
+
+    .p-name {
       font-weight: 700;
+      color: #F8FAFC;
+      font-size: 0.96rem;
+    }
+
+    .organizer-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: #818CF8;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      padding: 1px 6px;
+      border-radius: 9999px;
+    }
+
+    .ghost-badge {
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: #94A3B8;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 1px 6px;
+      border-radius: 9999px;
+    }
+
+    .p-breakdown {
+      font-size: 0.74rem;
+      color: #94A3B8;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+
+      strong {
+        color: #E2E8F0;
+      }
+
+      .bullet {
+        color: #475569;
+      }
+    }
+
+    .p-net-balance {
+      flex-shrink: 0;
+    }
+
+    .p-quick-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .quick-action-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #CBD5E1;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: #FFFFFF;
+      }
+    }
+
+    /* DOCK FLOTANTE INFERIOR */
+    .floating-dock-container {
+      position: fixed;
+      bottom: 24px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      z-index: 1000;
+      pointer-events: none;
+    }
+
+    .dock-pill {
+      pointer-events: auto;
+      background: rgba(14, 22, 38, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 9999px;
+      padding: 6px;
+      display: flex;
+      gap: 8px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7), 0 0 20px rgba(16, 185, 129, 0.12);
+    }
+
+    .dock-action-btn {
+      border: none;
+      border-radius: 9999px;
+      padding: 10px 18px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.2s ease;
 
       &:active {
         transform: scale(0.96);
       }
 
-      &.btn-secondary {
-        background: rgba(255, 255, 255, 0.06);
+      &.btn-consume {
+        background: rgba(255, 255, 255, 0.07);
         color: #F8FAFC;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+
+        &:hover {
+          background: rgba(255, 255, 255, 0.12);
+        }
       }
 
-      &.btn-primary {
+      &.btn-payment {
+        background: rgba(99, 102, 241, 0.2);
+        color: #A5B4FC;
+        border: 1px solid rgba(99, 102, 241, 0.35);
+
+        &:hover {
+          background: rgba(99, 102, 241, 0.3);
+        }
+      }
+
+      &.btn-close {
         background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-        color: #064E3B;
-        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        color: #FFFFFF;
+        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
       }
     }
 
-    /* Modals */
+    /* ESTILOS DE MODALES */
     .modal-wrapper {
-      background: #151D30;
-      padding: 24px;
+      background: #0E1626;
       height: 100%;
+      padding: 24px 20px;
       color: #F8FAFC;
+      display: flex;
+      flex-direction: column;
       overflow-y: auto;
     }
 
     .modal-header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
+      align-items: flex-start;
+      margin-bottom: 20px;
 
       h2 {
-        font-family: 'Outfit', sans-serif;
-        font-size: 1.35rem;
-        font-weight: 800;
         margin: 0;
+        font-family: 'Outfit', sans-serif;
+        font-size: 1.3rem;
+        font-weight: 800;
+      }
+    }
+
+    .assistant-header-text {
+      h2 {
+        margin: 0;
+        font-family: 'Outfit', sans-serif;
+        font-size: 1.3rem;
+        font-weight: 800;
       }
 
-      .close-btn {
-        background: transparent;
-        border: none;
+      .assistant-sub {
+        font-size: 0.78rem;
         color: #94A3B8;
-        font-size: 1.2rem;
-        cursor: pointer;
+        display: block;
+        margin-top: 3px;
       }
+    }
+
+    .close-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: none;
+      color: #CBD5E1;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    .modal-body {
+      flex: 1;
     }
 
     .modal-desc {
-      color: #94A3B8;
       font-size: 0.85rem;
-      margin-bottom: 16px;
-      line-height: 1.4;
+      color: #94A3B8;
+      margin-bottom: 18px;
     }
 
     .input-hint {
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       color: #94A3B8;
-      margin: 14px 0 10px;
+      margin-bottom: 14px;
     }
 
     .participant-form-body {
-      margin-top: 16px;
+      margin-top: 18px;
     }
 
-    .selector-title {
-      font-size: 0.85rem;
+    /* ASISTENTE DE CIERRE BOXES */
+    .unsettled-notice-box {
+      background: rgba(244, 63, 94, 0.1);
+      border: 1px solid rgba(244, 63, 94, 0.25);
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .notice-icon-box {
+      color: #FB7185;
+      font-size: 1.8rem;
+      line-height: 1;
+    }
+
+    .notice-info {
+      h3 {
+        margin: 0 0 4px;
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #FDA4AF;
+      }
+
+      p {
+        margin: 0;
+        font-size: 0.82rem;
+        color: #CBD5E1;
+        line-height: 1.4;
+
+        strong {
+          color: #FFFFFF;
+        }
+      }
+    }
+
+    .settled-notice-box {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      border-radius: 20px;
+      padding: 24px 18px;
+      text-align: center;
+      margin-bottom: 24px;
+
+      ion-icon {
+        font-size: 2.5rem;
+        color: #34D399;
+        margin-bottom: 8px;
+      }
+
+      h3 {
+        margin: 0 0 8px;
+        font-size: 1.2rem;
+        font-weight: 800;
+        color: #F8FAFC;
+      }
+
+      p {
+        margin: 0;
+        font-size: 0.85rem;
+        color: #CBD5E1;
+        line-height: 1.4;
+      }
+
+      .settled-helper {
+        margin-top: 10px;
+        color: #94A3B8;
+        font-size: 0.78rem;
+      }
+    }
+
+    .prompt-section {
+      margin-bottom: 24px;
+    }
+
+    .prompt-title {
+      display: block;
+      font-size: 0.88rem;
       font-weight: 700;
-      color: #E2E8F0;
+      color: #F8FAFC;
+      margin-bottom: 12px;
+    }
+
+    .assistant-choice-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 14px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+      margin-bottom: 16px;
+      transition: all 0.2s ease;
+
+      &.is-selected {
+        background: rgba(16, 185, 129, 0.14);
+        border-color: #10B981;
+        box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+      }
+    }
+
+    .choice-icon {
+      font-size: 1.6rem;
+    }
+
+    .choice-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .choice-heading {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #FFFFFF;
+    }
+
+    .choice-desc {
+      font-size: 0.76rem;
+      color: #94A3B8;
+      line-height: 1.3;
+    }
+
+    .other-payers-section {
+      margin-top: 14px;
+    }
+
+    .other-payers-label {
+      font-size: 0.78rem;
+      color: #94A3B8;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .cancel-link-btn {
+      background: none;
+      border: none;
+      color: #94A3B8;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-top: 12px;
+      width: 100%;
+      text-align: center;
+      cursor: pointer;
+      padding: 8px;
+
+      &:hover {
+        color: #F8FAFC;
+      }
+    }
+
+    /* CHIPS Y SELECTORES */
+    .participants-selector-section, .payer-selection-group {
+      margin-top: 16px;
+      margin-bottom: 20px;
     }
 
     .selector-header {
@@ -754,10 +1340,18 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       margin-bottom: 10px;
     }
 
+    .selector-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #CBD5E1;
+      display: block;
+      margin-bottom: 8px;
+    }
+
     .toggle-all-btn {
-      background: transparent;
+      background: none;
       border: none;
-      color: var(--ion-color-primary);
+      color: #818CF8;
       font-size: 0.78rem;
       font-weight: 700;
       cursor: pointer;
@@ -767,38 +1361,27 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      margin-bottom: 16px;
     }
 
     .person-toggle-chip {
       background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 9999px;
-      padding: 6px 12px;
+      padding: 6px 14px;
       display: flex;
       align-items: center;
       gap: 6px;
+      color: #CBD5E1;
+      font-size: 0.82rem;
+      font-weight: 600;
       cursor: pointer;
       transition: all 0.15s ease;
 
-      .chip-avatar {
-        font-size: 0.85rem;
-        font-weight: 700;
-      }
-
-      .chip-name {
-        font-size: 0.82rem;
-        color: #94A3B8;
-      }
-
       &.is-selected {
-        background: rgba(16, 185, 129, 0.2);
-        border-color: var(--ion-color-primary);
-
-        .chip-name {
-          color: #34D399;
-          font-weight: 700;
-        }
+        background: rgba(16, 185, 129, 0.18);
+        border-color: #10B981;
+        color: #34D399;
+        font-weight: 700;
       }
     }
 
@@ -807,9 +1390,9 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       border: 1px solid rgba(99, 102, 241, 0.25);
       border-radius: 12px;
       padding: 10px 14px;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: #C7D2FE;
-      margin-bottom: 20px;
+      margin-top: 14px;
       text-align: center;
 
       strong {
@@ -817,26 +1400,53 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       }
     }
 
-    .payer-selection-group {
-      margin-bottom: 16px;
-    }
-
     .modal-actions {
       margin-top: 20px;
-      padding-bottom: 30px;
+      padding-bottom: 24px;
     }
   `]
 })
-export class EventDetailPage implements OnInit {
+export class EventDetailPage implements OnInit, ViewWillEnter {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private api = inject(CabalesApiService);
-  private alertCtrl = inject(AlertController);
+  readonly auth = inject(AuthService);
   private toastCtrl = inject(ToastController);
 
   eventId = signal<string>('');
   evento = signal<EventoDetalleDTO | null>(null);
   isLoading = signal<boolean>(true);
+
+  // Computados Financieros
+  totalConsumidoCentavos = computed(() => this.evento()?.total_gastado_centavos || 0);
+
+  totalPagadoCentavos = computed(() => {
+    const parts = this.evento()?.participantes || [];
+    return parts.reduce((acc, p) => acc + (p.monto_pagado_centavos || 0), 0);
+  });
+
+  saldoPendienteCentavos = computed(() => {
+    const consumido = this.totalConsumidoCentavos();
+    const pagado = this.totalPagadoCentavos();
+    return Math.max(0, consumido - pagado);
+  });
+
+  porcentajeCubierto = computed(() => {
+    const consumido = this.totalConsumidoCentavos();
+    if (!consumido || consumido <= 0) return 100;
+    const pagado = this.totalPagadoCentavos();
+    return Math.min(100, Math.round((pagado / consumido) * 100));
+  });
+
+  isFacturaCubierta = computed(() => {
+    return this.saldoPendienteCentavos() === 0 && this.totalConsumidoCentavos() > 0;
+  });
+
+  organizadorParticipante = computed(() => {
+    const ev = this.evento();
+    if (!ev) return null;
+    return ev.participantes.find((p) => p.usuario_id === ev.creador.id) || null;
+  });
 
   // Modales
   isAddParticipantModalOpen = signal<boolean>(false);
@@ -856,6 +1466,11 @@ export class EventDetailPage implements OnInit {
   paymentCentavos = signal<number>(0);
   isSavingPayment = signal<boolean>(false);
 
+  // Asistente Inteligente de Cierre de Mesa
+  isCloseAssistantOpen = signal<boolean>(false);
+  closePayerId = signal<string>('');
+  isClosingTable = signal<boolean>(false);
+
   areAllSelected = computed(() => {
     const all = this.evento()?.participantes || [];
     return all.length > 0 && this.selectedParticipantIds().length === all.length;
@@ -873,7 +1488,14 @@ export class EventDetailPage implements OnInit {
       shieldCheckmarkOutline,
       arrowForwardOutline,
       alertCircleOutline,
-      cashOutline
+      cashOutline,
+      walletOutline,
+      receiptOutline,
+      warningOutline,
+      sparklesOutline,
+      swapHorizontalOutline,
+      checkmarkDoneOutline,
+      addOutline
     });
   }
 
@@ -885,6 +1507,12 @@ export class EventDetailPage implements OnInit {
     }
   }
 
+  ionViewWillEnter(): void {
+    if (this.eventId()) {
+      this.loadEvent();
+    }
+  }
+
   loadEvent(): void {
     const id = this.eventId();
     if (!id) return;
@@ -892,6 +1520,21 @@ export class EventDetailPage implements OnInit {
     this.isLoading.set(true);
     this.api.obtenerDetalleEvento(id).subscribe({
       next: (data) => {
+        // Si el creador no está sentado en la mesa y la mesa sigue ACTIVA, sentarlo automáticamente
+        const hasCreatorSeated = data.participantes.some((p) => p.usuario_id === data.creador.id);
+        if (!hasCreatorSeated && data.estado === 'ACTIVO') {
+          this.api.agregarParticipante(id, { usuario_id: data.creador.id }).subscribe({
+            next: () => {
+              this.loadEvent();
+            },
+            error: () => {
+              this.evento.set(data);
+              this.isLoading.set(false);
+            }
+          });
+          return;
+        }
+
         this.evento.set(data);
         this.isLoading.set(false);
       },
@@ -899,11 +1542,6 @@ export class EventDetailPage implements OnInit {
         this.isLoading.set(false);
       }
     });
-  }
-
-  getConsumptionPercentage(consumedCentavos: number, totalCentavos: number): number {
-    if (!totalCentavos || totalCentavos <= 0) return 0;
-    return Math.round((consumedCentavos / totalCentavos) * 100);
   }
 
   goToSettlement(): void {
@@ -953,7 +1591,6 @@ export class EventDetailPage implements OnInit {
   openConsumptionModal(): void {
     this.consumptionDesc.set('');
     this.consumptionCentavos.set(0);
-    // Por defecto seleccionar a todos los participantes
     const allIds = (this.evento()?.participantes || []).map((p) => p.id);
     this.selectedParticipantIds.set(allIds);
     this.isConsumptionModalOpen.set(true);
@@ -961,6 +1598,13 @@ export class EventDetailPage implements OnInit {
 
   closeConsumptionModal(): void {
     this.isConsumptionModalOpen.set(false);
+  }
+
+  quickConsumoFor(participanteId: string): void {
+    this.consumptionDesc.set('');
+    this.consumptionCentavos.set(0);
+    this.selectedParticipantIds.set([participanteId]);
+    this.isConsumptionModalOpen.set(true);
   }
 
   toggleParticipant(id: string): void {
@@ -1003,7 +1647,7 @@ export class EventDetailPage implements OnInit {
     });
   }
 
-  // --- PAGOS ---
+  // --- ABONOS / PAGOS ---
 
   openPaymentModal(): void {
     this.paymentCentavos.set(0);
@@ -1014,6 +1658,18 @@ export class EventDetailPage implements OnInit {
 
   closePaymentModal(): void {
     this.isPaymentModalOpen.set(false);
+  }
+
+  quickAbonoFor(participanteId: string): void {
+    this.selectedPayerId.set(participanteId);
+    const p = (this.evento()?.participantes || []).find((x) => x.id === participanteId);
+    if (p) {
+      const deuda = p.monto_consumido_centavos - p.monto_pagado_centavos;
+      this.paymentCentavos.set(deuda > 0 ? deuda : 0);
+    } else {
+      this.paymentCentavos.set(0);
+    }
+    this.isPaymentModalOpen.set(true);
   }
 
   submitPayment(): void {
@@ -1037,42 +1693,62 @@ export class EventDetailPage implements OnInit {
     });
   }
 
-  // --- CIERRE DE MESA ---
+  // --- ASISTENTE INTELIGENTE DE CIERRE DE MESA ---
 
-  async confirmCloseTable(): Promise<void> {
-    const alert = await this.alertCtrl.create({
-      header: '¿Liquidar y Cerrar Mesa?',
-      subHeader: 'Esta acción bloqueará la mesa y calculará el flujo mínimo de deudas.',
-      message: 'Nadie podrá agregar más consumos ni comensales a partir de este momento.',
-      buttons: [
-        { text: 'Cancelar', role: 'cancel' },
-        {
-          text: 'Sí, Liquidar Mesa',
-          role: 'confirm',
-          handler: () => {
-            this.executeCloseTable();
-          }
-        }
-      ]
-    });
-
-    await alert.present();
+  openCloseAssistant(): void {
+    if (this.evento()?.estado === 'CERRADO') {
+      this.goToSettlement();
+      return;
+    }
+    const org = this.organizadorParticipante();
+    const first = this.evento()?.participantes?.[0];
+    const defaultPayer = org ? org.id : (first ? first.id : '');
+    this.closePayerId.set(defaultPayer);
+    this.isCloseAssistantOpen.set(true);
   }
 
-  private executeCloseTable(): void {
-    this.isLoading.set(true);
-    this.api.cerrarEvento(this.eventId()).subscribe({
-      next: () => {
-        this.isLoading.set(false);
+  closeCloseAssistant(): void {
+    this.isCloseAssistantOpen.set(false);
+  }
+
+  submitCloseTable(): void {
+    const saldo = this.saldoPendienteCentavos();
+    const body: CerrarMesaBodyDTO = {};
+    if (saldo > 0) {
+      const payerId = this.closePayerId();
+      if (!payerId) {
         this.toastCtrl.create({
-          message: '¡Mesa liquidada con éxito!',
+          message: 'Selecciona quién cubrió el saldo restante.',
+          duration: 3000,
+          color: 'warning'
+        }).then(t => t.present());
+        return;
+      }
+      body.pagador_restante_id = payerId;
+    }
+
+    this.isClosingTable.set(true);
+    this.api.cerrarEvento(this.eventId(), body).subscribe({
+      next: () => {
+        this.isClosingTable.set(false);
+        this.closeCloseAssistant();
+        this.toastCtrl.create({
+          message: '¡Mesa liquidada con éxito! Deudas calculadas.',
           duration: 2500,
           color: 'success'
         }).then((t) => t.present());
-        this.goToSettlement();
+        setTimeout(() => {
+          this.goToSettlement();
+        }, 180);
       },
-      error: () => {
-        this.isLoading.set(false);
+      error: (err) => {
+        this.isClosingTable.set(false);
+        const msg = err?.error?.message || 'Error al liquidar la mesa';
+        this.toastCtrl.create({
+          message: msg,
+          duration: 4000,
+          color: 'danger'
+        }).then(t => t.present());
       }
     });
   }

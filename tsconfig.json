@@ -16,10 +16,6 @@
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
-    "moduleDetection": "force",
-    "noUncheckedSideEffectImports": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
     "noUncheckedSideEffectImports": true
   },
   "include": ["src/**/*"],

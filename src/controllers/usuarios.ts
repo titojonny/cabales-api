@@ -63,21 +63,33 @@ export const obtenerEventosDeUsuario = async (req: Request, res: Response, next:
         fecha: true,
         total_gastado_centavos: true,
         _count: { select: { participantes: true } },
-        creador: { select: { id: true, nombre: true } }
+        creador: { select: { id: true, nombre: true } },
+        transacciones: { select: { estado: true } }
       },
       orderBy: { fecha: 'desc' }
     });
 
-    const data = eventos.map((evento) => ({
-      id: evento.id,
-      nombre: evento.nombre,
-      estado: evento.estado,
-      fecha: evento.fecha,
-      total_gastado_centavos: evento.total_gastado_centavos,
-      numero_comensales: evento._count.participantes,
-      es_creador: evento.creador.id === usuarioId,
-      creador: evento.creador
-    }));
+    const data = eventos.map((evento) => {
+      const totalTx = evento.transacciones.length;
+      const completadasTx = evento.transacciones.filter((t) => t.estado === 'COMPLETADO').length;
+      const estaSaldado =
+        evento.estado === 'CERRADO' && (totalTx === 0 || completadasTx === totalTx);
+
+      return {
+        id: evento.id,
+        nombre: evento.nombre,
+        estado: evento.estado,
+        fecha: evento.fecha,
+        total_gastado_centavos: evento.total_gastado_centavos,
+        numero_comensales: evento._count.participantes,
+        es_creador: evento.creador.id === usuarioId,
+        creador: evento.creador,
+        esta_saldado: estaSaldado,
+        total_transacciones: totalTx,
+        transacciones_completadas: completadasTx,
+        transacciones_pendientes: totalTx - completadasTx
+      };
+    });
 
     res.status(200).json({ success: true, message: 'Eventos obtenidos', data });
   } catch (error) {

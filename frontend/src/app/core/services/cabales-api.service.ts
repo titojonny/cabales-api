@@ -14,7 +14,8 @@ import {
   CrearConsumoDTO,
   RegistrarPagoDTO,
   AgregarParticipanteDTO,
-  ActualizarEstadoTransaccionDTO
+  ActualizarEstadoTransaccionDTO,
+  CerrarMesaBodyDTO
 } from '../models/cabales.models';
 
 @Injectable({
@@ -44,7 +45,8 @@ export class CabalesApiService {
     return this.http
       .post<ApiResponse<EventoDTO>>(`${this.baseUrl}/events`, {
         nombre,
-        creador_id: creadorId
+        creador_id: creadorId,
+        auto_incluir_creador: true
       })
       .pipe(map((res) => res.data));
   }
@@ -96,11 +98,26 @@ export class CabalesApiService {
       .pipe(map((res) => res.data));
   }
 
+  subirComprobante(transaccionId: string, archivo: File): Observable<TransaccionDTO> {
+    const formData = new FormData();
+    formData.append('comprobante', archivo);
+    return this.http
+      .post<ApiResponse<TransaccionDTO>>(`${this.baseUrl}/transactions/${transaccionId}/comprobante`, formData)
+      .pipe(map((res) => res.data));
+  }
+
+  resolverUrlComprobante(url: string | null | undefined): string {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+    const host = this.baseUrl.replace(/\/api\/?$/, '');
+    return `${host}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+
   // --- CIERRE DE MESA (GREEDY SETTLEMENT) ---
 
-  cerrarEvento(eventoId: string): Observable<CierreMesaDTO> {
+  cerrarEvento(eventoId: string, body: CerrarMesaBodyDTO = {}): Observable<CierreMesaDTO> {
     return this.http
-      .post<ApiResponse<CierreMesaDTO>>(`${this.baseUrl}/events/${eventoId}/close`, {})
+      .post<ApiResponse<CierreMesaDTO>>(`${this.baseUrl}/events/${eventoId}/close`, body)
       .pipe(map((res) => res.data));
   }
 }

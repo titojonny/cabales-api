@@ -92,3 +92,46 @@ export const actualizarEstadoTransaccion = async (req: Request, res: Response, n
     next(error);
   }
 };
+
+// POST /api/transactions/:id/comprobante — subida de imagen de comprobante bancario
+export const subirComprobanteTransaccion = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const transaccionId = assertParamId(req.params.id, 'transacción');
+
+    if (!req.file) {
+      throw new HttpError(400, 'Debes adjuntar un archivo de imagen como comprobante');
+    }
+
+    const transaccion = await prisma.transaccion.findUnique({ where: { id: transaccionId } });
+    if (!transaccion) {
+      throw new HttpError(404, 'La transacción no existe');
+    }
+
+    if (transaccion.estado === 'COMPLETADO') {
+      throw new HttpError(409, 'La transacción ya está completada, no requiere comprobante');
+    }
+
+    if (!esTransicionPermitida(transaccion.estado, 'EN_REVISION') && transaccion.estado !== 'EN_REVISION') {
+      throw new HttpError(409, `No se puede subir comprobante: la transacción está en estado ${transaccion.estado}`);
+    }
+
+    const comprobanteUrl = `/uploads/comprobantes/${req.file.filename}`;
+
+    const actualizada = await prisma.transaccion.update({
+      where: { id: transaccionId },
+      data: {
+        estado: 'EN_REVISION',
+        comprobante_url: comprobanteUrl,
+        fecha_limite: new Date(Date.now() + SIETE_DIAS_MS)
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Comprobante subido exitosamente y enviado a revisión',
+      data: actualizada
+    });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -3,17 +3,16 @@ import { CommonModule } from '@angular/common';
 import { IonIcon } from '@ionic/angular';
 import { addIcons } from 'ionicons';
 import { backspaceOutline } from 'ionicons/icons';
-import { CentavosADineroPipe } from '../../pipes/centavos-a-dinero.pipe';
 
 @Component({
   selector: 'app-money-input',
   standalone: true,
-  imports: [CommonModule, IonIcon, CentavosADineroPipe],
+  imports: [CommonModule, IonIcon],
   template: `
     <div class="money-input-container">
       <div class="display-container">
         <span class="currency-symbol">$</span>
-        <span class="amount-number tabular-nums">{{ centavos() | centavosADinero: 'es-SV': '' }}</span>
+        <span class="amount-number tabular-nums">{{ (centavos() / 100).toFixed(2) }}</span>
       </div>
 
       <!-- Quick Add Buttons -->

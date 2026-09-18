@@ -102,6 +102,41 @@ describe('POST /api/events/:id/close', () => {
     await prisma.participante.deleteMany({ where: { evento_id: eventoSolo } });
     await prisma.evento.deleteMany({ where: { id: eventoSolo } });
   });
+
+  it('400 si hay consumos pendientes y no se especifica pagador_restante_id', async () => {
+    const evDesbalanceado = await crearEvento(usuarioId, 'Mesa desbalanceada');
+    try {
+      const p1 = (await request(app).post(`/api/events/${evDesbalanceado}/participants`).send({ usuario_id: usuarioId })).body.data.id;
+      const p2 = (await request(app).post(`/api/events/${evDesbalanceado}/participants`).send({ nombre_invitado: 'Amigo Deudor' })).body.data.id;
+
+      // Amigo consume 2000 pero nadie registra pago al restaurante
+      await request(app).post(`/api/events/${evDesbalanceado}/consumptions`).send({
+        monto_centavos: 2000,
+        participante_ids: [p2]
+      });
+
+      const res = await request(app).post(`/api/events/${evDesbalanceado}/close`);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('Faltan pagos por registrar en la mesa');
+
+      // Ahora liquidamos pasando pagador_restante_id = p1 (el anfitrión cubrió el restaurante)
+      const resOk = await request(app)
+        .post(`/api/events/${evDesbalanceado}/close`)
+        .send({ pagador_restante_id: p1 });
+
+      expect(resOk.status).toBe(201);
+      expect(resOk.body.data.evento.estado).toBe('CERRADO');
+      expect(resOk.body.data.transacciones).toHaveLength(1);
+      expect(resOk.body.data.transacciones[0].deudorId).toBe(p2);
+      expect(resOk.body.data.transacciones[0].acreedorId).toBe(p1);
+      expect(resOk.body.data.transacciones[0].monto_centavos).toBe(2000);
+    } finally {
+      // Limpieza garantizada
+      await prisma.transaccion.deleteMany({ where: { evento_id: evDesbalanceado } });
+      await prisma.participante.deleteMany({ where: { evento_id: evDesbalanceado } });
+      await prisma.evento.deleteMany({ where: { id: evDesbalanceado } });
+    }
+  });
 });
 
 afterAll(async () => {

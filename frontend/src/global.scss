@@ -87,6 +87,36 @@ body {
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+/* Balance Badges en Vivo */
+.balance-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+
+  &.debt {
+    background: var(--cabales-debt-bg);
+    color: var(--cabales-debt-text);
+    border: 1px solid var(--cabales-debt-border);
+  }
+
+  &.credit {
+    background: var(--cabales-credit-bg);
+    color: var(--cabales-credit-text);
+    border: 1px solid var(--cabales-credit-border);
+  }
+
+  &.neutral {
+    background: var(--cabales-neutral-bg);
+    color: var(--cabales-neutral-text);
+    border: 1px solid var(--cabales-neutral-border);
+  }
+}
+
 /* Floating Action Button Styling */
 ion-fab-button {
   --background: linear-gradient(135deg, #10B981 0%, #059669 100%);

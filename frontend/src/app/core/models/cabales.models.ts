@@ -43,6 +43,10 @@ export interface EventoUsuarioItemDTO {
     id: string;
     nombre: string;
   };
+  esta_saldado?: boolean;
+  total_transacciones?: number;
+  transacciones_completadas?: number;
+  transacciones_pendientes?: number;
 }
 
 export interface EventoDTO {
@@ -60,6 +64,10 @@ export interface ParticipanteDetalleDTO {
   usuario_id: string | null;
   monto_consumido_centavos: number;
   monto_pagado_centavos: number;
+  deuda_pendiente_centavos?: number;
+  por_cobrar_pendiente_centavos?: number;
+  deuda_saldada_centavos?: number;
+  esta_saldado?: boolean;
 }
 
 export interface EventoDetalleDTO {
@@ -70,6 +78,10 @@ export interface EventoDetalleDTO {
   total_gastado_centavos: number;
   numero_comensales: number;
   numero_transacciones: number;
+  total_transacciones?: number;
+  transacciones_completadas?: number;
+  transacciones_pendientes?: number;
+  esta_totalmente_saldado?: boolean;
   creador: {
     id: string;
     nombre: string;
@@ -137,6 +149,10 @@ export interface TransferenciaCalculadaDTO {
   deudorId: string;
   acreedorId: string;
   monto_centavos: number;
+}
+
+export interface CerrarMesaBodyDTO {
+  pagador_restante_id?: string;
 }
 
 export interface CierreMesaDTO {

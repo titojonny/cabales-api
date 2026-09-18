@@ -19,6 +19,7 @@ import {
   IonItem,
   IonInput,
   ToastController,
+  ViewWillEnter
 } from '@ionic/angular';
 import { addIcons } from 'ionicons';
 import {
@@ -121,11 +122,13 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
             <div class="empty-icon-box">
               <ion-icon name="sparkles-outline"></ion-icon>
             </div>
-            <h3>No tienes mesas aquí</h3>
-            <p>¡Crea una nueva salida con tus amigos para empezar a dividir gastos!</p>
-            <ion-button color="primary" fill="outline" shape="round" (click)="openCreateModal()">
-              + Crear Primera Salida
-            </ion-button>
+            <h3>{{ selectedFilter() === 'ACTIVOS' ? 'No tienes mesas activas ni cobros pendientes' : 'No tienes mesas en el histórico' }}</h3>
+            <p>{{ selectedFilter() === 'ACTIVOS' ? '¡Crea una nueva salida con tus amigos para empezar a dividir gastos!' : 'Las mesas 100% saldadas aparecerán aquí una vez que todos estén cabales.' }}</p>
+            @if (selectedFilter() === 'ACTIVOS') {
+              <ion-button color="primary" fill="outline" shape="round" (click)="openCreateModal()">
+                + Crear Primera Salida
+              </ion-button>
+            }
           </div>
         } @else {
           <div class="cards-grid">
@@ -144,9 +147,22 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
                       } @else {
                         <span class="guest-badge">Creado por {{ evento.creador.nombre }}</span>
                       }
+                      @if (evento.estado === 'CERRADO' && !evento.esta_saldado && (evento.transacciones_pendientes ?? 0) > 0) {
+                        <span class="pending-tx-badge">
+                          {{ evento.transacciones_pendientes }} cobro(s) pendiente(s)
+                        </span>
+                      }
                     </div>
                   </div>
-                  <app-status-badge [status]="evento.estado"></app-status-badge>
+                  @if (evento.estado === 'CERRADO') {
+                    @if (evento.esta_saldado) {
+                      <span class="history-badge saldado">✓ 100% Saldada</span>
+                    } @else {
+                      <span class="history-badge pendiente">⏳ Cobros pendientes</span>
+                    }
+                  } @else {
+                    <app-status-badge [status]="evento.estado"></app-status-badge>
+                  }
                 </div>
 
                 <div class="event-card-divider"></div>
@@ -281,7 +297,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
   `,
   styles: [`
     .cabales-toolbar {
-      --background: #0B0F19;
+      --background: #080C14;
       --border-width: 0;
       padding: 8px 16px;
     }
@@ -339,7 +355,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .dashboard-content {
-      --background: #0B0F19;
+      --background: #080C14;
       padding: 16px;
     }
 
@@ -410,7 +426,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .event-card-item {
-      background: #151D30;
+      background: #0E1626;
       border: 1px solid rgba(255, 255, 255, 0.07);
       border-radius: 20px;
       padding: 16px 18px;
@@ -470,6 +486,18 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       border-radius: 4px;
     }
 
+    .pending-tx-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #FCD34D;
+      background: rgba(245, 158, 11, 0.14);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 2px 7px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+    }
+
     .event-card-divider {
       height: 1px;
       background: rgba(255, 255, 255, 0.06);
@@ -509,6 +537,27 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       font-size: 1.1rem;
       font-weight: 700;
       color: var(--ion-color-primary);
+    }
+
+    .history-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+
+      &.saldado {
+        background: rgba(16, 185, 129, 0.15);
+        color: #34D399;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+
+      &.pendiente {
+        background: rgba(245, 158, 11, 0.15);
+        color: #FBBF24;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+      }
     }
 
     .loading-state, .empty-state {
@@ -614,7 +663,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
   `]
 })
-export class DashboardPage implements OnInit {
+export class DashboardPage implements OnInit, ViewWillEnter {
   private api = inject(CabalesApiService);
   private auth = inject(AuthService);
   private router = inject(Router);
@@ -635,8 +684,12 @@ export class DashboardPage implements OnInit {
   switchUserName = signal<string>('');
   switchUserEmail = signal<string>('');
 
-  activeEvents = computed(() => this.events().filter((e) => e.estado === 'ACTIVO'));
-  closedEvents = computed(() => this.events().filter((e) => e.estado === 'CERRADO'));
+  activeEvents = computed(() => {
+    return this.events().filter((e) => e.estado === 'ACTIVO' || !e.esta_saldado);
+  });
+  closedEvents = computed(() => {
+    return this.events().filter((e) => e.estado === 'CERRADO' && e.esta_saldado);
+  });
 
   filteredEvents = computed(() => {
     return this.selectedFilter() === 'ACTIVOS' ? this.activeEvents() : this.closedEvents();
@@ -662,6 +715,13 @@ export class DashboardPage implements OnInit {
 
   ngOnInit(): void {
     this.ensureUserAndLoadEvents();
+  }
+
+  ionViewWillEnter(): void {
+    const user = this.currentUser();
+    if (user && user.id && user.id !== 'default-user-id') {
+      this.loadEvents(user.id);
+    }
   }
 
   private ensureUserAndLoadEvents(): void {
@@ -738,7 +798,9 @@ export class DashboardPage implements OnInit {
       next: (created) => {
         this.isSubmitting.set(false);
         this.closeCreateModal();
-        this.goToEvent(created.id);
+        setTimeout(() => {
+          this.goToEvent(created.id);
+        }, 180);
       },
       error: () => {
         this.isSubmitting.set(false);

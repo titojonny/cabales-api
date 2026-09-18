@@ -1,3 +1,4 @@
+import path from 'node:path';
 import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -36,6 +37,9 @@ app.use(
 
 // Middleware para que Express entienda JSON con límite de payload
 app.use(express.json({ limit: '10kb' }));
+
+// Servir estáticamente archivos subidos (comprobantes de pago)
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Rutas de la API
 app.use('/api', healthRouter);

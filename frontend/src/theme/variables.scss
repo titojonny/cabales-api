@@ -62,26 +62,42 @@
   --ion-color-info-shade: #2563EB;
   --ion-color-info-tint: #60A5FA;
 
-  /* Paleta Oscura de Fondo */
-  --ion-background-color: #0B0F19;
-  --ion-background-color-rgb: 11, 15, 25;
+  /* Paleta Oscura de Fondo Ultra-Moderna */
+  --ion-background-color: #080C14;
+  --ion-background-color-rgb: 8, 12, 20;
 
   --ion-text-color: #F8FAFC;
   --ion-text-color-rgb: 248, 250, 252;
 
-  --ion-card-background: #151D30;
-  --ion-item-background: #151D30;
-  --ion-toolbar-background: #0B0F19;
-  --ion-tab-bar-background: #0B0F19;
+  --ion-card-background: #0E1626;
+  --ion-item-background: #0E1626;
+  --ion-toolbar-background: #080C14;
+  --ion-tab-bar-background: #080C14;
 
   --ion-border-color: rgba(255, 255, 255, 0.08);
 
-  /* Tokens Custom de Cabales */
-  --cabales-bg-gradient: linear-gradient(135deg, #0B0F19 0%, #111827 50%, #0F172A 100%);
-  --cabales-card-border: 1px solid rgba(255, 255, 255, 0.07);
-  --cabales-card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  /* Tokens Custom de Cabales Fintech */
+  --cabales-bg-gradient: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.1) 0%, #080C14 70%);
+  --cabales-card-border: 1px solid rgba(255, 255, 255, 0.08);
+  --cabales-card-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
   --cabales-glow-emerald: 0 0 25px rgba(16, 185, 129, 0.25);
   --cabales-glow-indigo: 0 0 25px rgba(99, 102, 241, 0.25);
-  --cabales-glass-bg: rgba(21, 29, 48, 0.75);
-  --cabales-glass-blur: blur(16px);
+  --cabales-glass-bg: rgba(14, 22, 38, 0.85);
+  --cabales-glass-blur: blur(20px);
+
+  /* Tokens Semánticos de Balance */
+  --cabales-debt: #FB7185;
+  --cabales-debt-text: #FDA4AF;
+  --cabales-debt-bg: rgba(244, 63, 94, 0.12);
+  --cabales-debt-border: rgba(244, 63, 94, 0.25);
+
+  --cabales-credit: #34D399;
+  --cabales-credit-text: #6EE7B7;
+  --cabales-credit-bg: rgba(16, 185, 129, 0.12);
+  --cabales-credit-border: rgba(16, 185, 129, 0.25);
+
+  --cabales-neutral: #94A3B8;
+  --cabales-neutral-text: #CBD5E1;
+  --cabales-neutral-bg: rgba(148, 163, 184, 0.1);
+  --cabales-neutral-border: rgba(148, 163, 184, 0.2);
 }
