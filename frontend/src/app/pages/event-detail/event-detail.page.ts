@@ -186,6 +186,26 @@ import { compartirTexto, copiarTextoAlPortapapeles, generarMensajeInvitacionMesa
           }
         </div>
 
+        <!-- BANNER DE BIENVENIDA / RECLAMO DE ASIENTO PARA VISITANTES -->
+        @if (ev.estado === 'ACTIVO' && !isCurrentUserSeated()) {
+          <div class="visitor-claim-banner">
+            <div class="visitor-banner-content">
+              <div class="visitor-icon-box">
+                <ion-icon name="sparkles-outline"></ion-icon>
+              </div>
+              <div class="visitor-text">
+                <h3 class="visitor-title">¿Estás en esta mesa?</h3>
+                <p class="visitor-desc">
+                  Reclama tu lugar o siéntate para seleccionar tus consumos y pagar exactamente lo tuyo.
+                </p>
+              </div>
+            </div>
+            <button type="button" class="btn-claim-seat" (click)="openClaimModal()">
+              <span>Sentarme a la mesa ➔</span>
+            </button>
+          </div>
+        }
+
         <!-- TABS DE NAVEGACIÓN: COMENSALES VS CUENTA DETALLADA -->
         <div class="tabs-segment-container">
           <ion-segment [value]="activeTab()" (ionChange)="activeTab.set($any($event.detail.value))" mode="ios">
@@ -308,6 +328,11 @@ import { compartirTexto, copiarTextoAlPortapapeles, generarMensajeInvitacionMesa
                         <ion-icon name="restaurant-outline"></ion-icon>
                         <span>+ Consumo</span>
                       </button>
+                      @if (p.es_fantasma && !isCurrentUserSeated()) {
+                        <button type="button" class="quick-action-btn claim-action-btn" (click)="openClaimModal(p)">
+                          <span>🙋‍♂️ Soy yo</span>
+                        </button>
+                      }
                     </div>
                   }
                 </div>
@@ -827,6 +852,81 @@ import { compartirTexto, copiarTextoAlPortapapeles, generarMensajeInvitacionMesa
                   <span>Más opciones</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </ng-template>
+      </ion-modal>
+
+      <!-- MODAL: RECLAMAR ASIENTO / IDENTIFICARSE EN LA MESA -->
+      <ion-modal [isOpen]="isClaimModalOpen()" (didDismiss)="closeClaimModal()">
+        <ng-template>
+          <div class="modal-wrapper claim-modal-box">
+            <div class="modal-header">
+              <h2>¿Quién eres en esta mesa?</h2>
+              <button class="close-btn" (click)="closeClaimModal()">✕</button>
+            </div>
+            <div class="modal-body">
+              <p class="modal-desc">
+                Identifícate en segundos para que puedas marcar consumos, abonar a la cuenta y ver tu balance personal.
+              </p>
+
+              <div class="claim-input-section">
+                <ion-item class="cabales-input-item" lines="none">
+                  <ion-input
+                    label="Tu nombre o apodo"
+                    labelPlacement="stacked"
+                    placeholder="Ej. Jonathan, Sofía, Carlos"
+                    [value]="claimUserName()"
+                    (ionInput)="claimUserName.set($any($event.target).value)"
+                  ></ion-input>
+                </ion-item>
+              </div>
+
+              @if (ghostParticipants().length > 0) {
+                <div class="claim-ghost-section">
+                  <span class="section-subheading">¿El organizador ya te agregó? Toca tu nombre:</span>
+                  <div class="ghost-list-grid">
+                    @for (gp of ghostParticipants(); track gp.id) {
+                      <button
+                        type="button"
+                        class="ghost-claim-card"
+                        [disabled]="isClaiming()"
+                        (click)="claimExistingSeat(gp)"
+                      >
+                        <div class="ghost-avatar">👤</div>
+                        <div class="ghost-info">
+                          <span class="ghost-name">{{ gp.nombre_visible }}</span>
+                          <span class="ghost-hint">
+                            @if (gp.monto_consumido_centavos > 0) {
+                              Consumo previo: {{ gp.monto_consumido_centavos | centavosADinero }}
+                            } @else {
+                              Asiento asignado sin consumos
+                            }
+                          </span>
+                        </div>
+                        <span class="ghost-action-badge">Reclamar ➔</span>
+                      </button>
+                    }
+                  </div>
+                </div>
+
+                <div class="join-divider">
+                  <span>O CREA UN ASIENTO NUEVO</span>
+                </div>
+              }
+
+              <ion-button
+                expand="block"
+                class="cabales-primary-btn"
+                [disabled]="isClaiming() || !claimUserName().trim()"
+                (click)="joinAsNewComensal()"
+              >
+                @if (isClaiming()) {
+                  <ion-spinner name="crescent"></ion-spinner>
+                } @else {
+                  Sentarme como comensal nuevo ➔
+                }
+              </ion-button>
             </div>
           </div>
         </ng-template>
@@ -2142,6 +2242,188 @@ import { compartirTexto, copiarTextoAlPortapapeles, generarMensajeInvitacionMesa
         cursor: pointer;
       }
     }
+
+    /* BANNER DE RECLAMO PARA VISITANTES */
+    .visitor-claim-banner {
+      background: linear-gradient(135deg, rgba(77, 190, 85, 0.15) 0%, rgba(20, 31, 20, 0.9) 100%);
+      border: 1px solid rgba(77, 190, 85, 0.4);
+      border-radius: 20px;
+      padding: 16px 20px;
+      margin: 0 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+
+      @media (min-width: 600px) {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+      }
+    }
+
+    .visitor-banner-content {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .visitor-icon-box {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(77, 190, 85, 0.2);
+      border: 1px solid #4DBE55;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #79ED91;
+      font-size: 1.4rem;
+      flex-shrink: 0;
+    }
+
+    .visitor-text {
+      .visitor-title {
+        font-family: 'Outfit', sans-serif;
+        font-size: 1.05rem;
+        font-weight: 800;
+        color: #F1F1F1;
+        margin: 0 0 4px;
+      }
+
+      .visitor-desc {
+        font-size: 0.82rem;
+        color: #BEBEBE;
+        margin: 0;
+        line-height: 1.35;
+      }
+    }
+
+    .btn-claim-seat {
+      background: #4DBE55;
+      color: #141F14;
+      border: none;
+      border-radius: 9999px;
+      padding: 10px 18px;
+      font-weight: 800;
+      font-size: 0.88rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+
+      &:hover {
+        background: #5ce465;
+        transform: translateY(-1px);
+      }
+    }
+
+    .claim-action-btn {
+      background: rgba(77, 190, 85, 0.16) !important;
+      border-color: rgba(77, 190, 85, 0.5) !important;
+      color: #79ED91 !important;
+      font-weight: 700 !important;
+
+      &:hover {
+        background: rgba(77, 190, 85, 0.28) !important;
+      }
+    }
+
+    /* MODAL DE RECLAMO */
+    .claim-modal-box {
+      .claim-input-section {
+        margin-bottom: 16px;
+      }
+
+      .claim-ghost-section {
+        margin: 16px 0;
+      }
+
+      .ghost-list-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .ghost-claim-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(113, 119, 109, 0.35);
+        border-radius: 14px;
+        padding: 10px 14px;
+        text-align: left;
+        cursor: pointer;
+        width: 100%;
+        transition: all 0.2s ease;
+
+        &:hover:not(:disabled) {
+          border-color: #4DBE55;
+          background: rgba(77, 190, 85, 0.12);
+        }
+
+        &:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+      }
+
+      .ghost-avatar {
+        font-size: 1.3rem;
+      }
+
+      .ghost-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .ghost-name {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #F1F1F1;
+      }
+
+      .ghost-hint {
+        font-size: 0.75rem;
+        color: #BEBEBE;
+      }
+
+      .ghost-action-badge {
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #79ED91;
+        background: rgba(77, 190, 85, 0.15);
+        border: 1px solid rgba(77, 190, 85, 0.3);
+        padding: 4px 8px;
+        border-radius: 8px;
+      }
+
+      .join-divider {
+        display: flex;
+        align-items: center;
+        text-align: center;
+        margin: 18px 0 14px;
+        color: #7A8077;
+        font-size: 0.7rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+
+        &::before, &::after {
+          content: '';
+          flex: 1;
+          border-bottom: 1px solid rgba(113, 119, 109, 0.25);
+        }
+
+        span {
+          padding: 0 10px;
+        }
+      }
+    }
   `]
 })
 export class EventDetailPage implements OnInit, ViewWillEnter {
@@ -2232,6 +2514,24 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
     return typeof window !== 'undefined' ? `${window.location.origin}/events/${id}` : '';
   });
 
+  // Reclamo de asiento e Identidad
+  isClaimModalOpen = signal<boolean>(false);
+  claimUserName = signal<string>('');
+  isClaiming = signal<boolean>(false);
+
+  isCurrentUserSeated = computed(() => {
+    const userId = this.auth.currentUserId();
+    const ev = this.evento();
+    if (!userId || !ev) return false;
+    return ev.participantes.some((p) => p.usuario_id === userId);
+  });
+
+  ghostParticipants = computed(() => {
+    const ev = this.evento();
+    if (!ev) return [];
+    return ev.participantes.filter((p) => p.es_fantasma || !p.usuario_id);
+  });
+
   constructor() {
     addIcons({
       peopleOutline,
@@ -2317,6 +2617,173 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
   onParticipantTypeChange(val: any): void {
     if (val === 'GHOST' || val === 'USER') {
       this.participantType.set(val);
+    }
+  }
+
+  // --- RECLAMO DE ASIENTO E IDENTIDAD ---
+
+  openClaimModal(targetGhost?: ParticipanteDetalleDTO): void {
+    if (this.auth.currentUserName()) {
+      this.claimUserName.set(this.auth.currentUserName());
+    } else if (targetGhost) {
+      this.claimUserName.set(targetGhost.nombre_visible);
+    } else {
+      this.claimUserName.set('');
+    }
+    this.isClaimModalOpen.set(true);
+  }
+
+  closeClaimModal(): void {
+    this.isClaimModalOpen.set(false);
+  }
+
+  claimExistingSeat(gp: ParticipanteDetalleDTO): void {
+    const eventId = this.eventId();
+    if (!eventId) return;
+
+    this.isClaiming.set(true);
+    const userId = this.auth.currentUserId();
+
+    if (userId) {
+      this.api.reclamarParticipante(eventId, gp.id, userId).subscribe({
+        next: () => {
+          this.isClaiming.set(false);
+          this.closeClaimModal();
+          this.loadEvent();
+          this.toastCtrl
+            .create({
+              message: `¡Has tomado tu lugar como ${gp.nombre_visible}!`,
+              duration: 2500,
+              color: 'success'
+            })
+            .then((t) => t.present());
+        },
+        error: (err) => {
+          this.isClaiming.set(false);
+          this.toastCtrl
+            .create({
+              message: 'Error al reclamar asiento: ' + (err.error?.error || err.message || 'Error desconocido'),
+              duration: 3000,
+              color: 'danger'
+            })
+            .then((t) => t.present());
+        }
+      });
+    } else {
+      const name = this.claimUserName().trim() || gp.nombre_visible;
+      this.auth.registerOrLogin(name).subscribe({
+        next: (user) => {
+          this.api.reclamarParticipante(eventId, gp.id, user.id).subscribe({
+            next: () => {
+              this.isClaiming.set(false);
+              this.closeClaimModal();
+              this.loadEvent();
+              this.toastCtrl
+                .create({
+                  message: `¡Bienvenido ${user.nombre}! Has tomado tu lugar en la mesa`,
+                  duration: 2500,
+                  color: 'success'
+                })
+                .then((t) => t.present());
+            },
+            error: (err) => {
+              this.isClaiming.set(false);
+              this.toastCtrl
+                .create({
+                  message: 'Error al reclamar asiento: ' + (err.error?.error || err.message || 'Error desconocido'),
+                  duration: 3000,
+                  color: 'danger'
+                })
+                .then((t) => t.present());
+            }
+          });
+        },
+        error: (err) => {
+          this.isClaiming.set(false);
+          this.toastCtrl
+            .create({
+              message: 'Error al registrar usuario: ' + (err.error?.error || err.message || 'Error desconocido'),
+              duration: 3000,
+              color: 'danger'
+            })
+            .then((t) => t.present());
+        }
+      });
+    }
+  }
+
+  joinAsNewComensal(): void {
+    const eventId = this.eventId();
+    const name = this.claimUserName().trim();
+    if (!eventId || !name) return;
+
+    this.isClaiming.set(true);
+    const currentId = this.auth.currentUserId();
+
+    if (currentId) {
+      this.api.agregarParticipante(eventId, { usuario_id: currentId }).subscribe({
+        next: () => {
+          this.isClaiming.set(false);
+          this.closeClaimModal();
+          this.loadEvent();
+          this.toastCtrl
+            .create({
+              message: `¡Te has sentado en la mesa como ${name}!`,
+              duration: 2500,
+              color: 'success'
+            })
+            .then((t) => t.present());
+        },
+        error: (err) => {
+          this.isClaiming.set(false);
+          this.toastCtrl
+            .create({
+              message: 'Error al sentarse en la mesa: ' + (err.error?.error || err.message || 'Error desconocido'),
+              duration: 3000,
+              color: 'danger'
+            })
+            .then((t) => t.present());
+        }
+      });
+    } else {
+      this.auth.registerOrLogin(name).subscribe({
+        next: (user) => {
+          this.api.agregarParticipante(eventId, { usuario_id: user.id }).subscribe({
+            next: () => {
+              this.isClaiming.set(false);
+              this.closeClaimModal();
+              this.loadEvent();
+              this.toastCtrl
+                .create({
+                  message: `¡Bienvenido ${user.nombre}! Te has sentado en la mesa`,
+                  duration: 2500,
+                  color: 'success'
+                })
+                .then((t) => t.present());
+            },
+            error: (err) => {
+              this.isClaiming.set(false);
+              this.toastCtrl
+                .create({
+                  message: 'Error al sentarse en la mesa: ' + (err.error?.error || err.message || 'Error desconocido'),
+                  duration: 3000,
+                  color: 'danger'
+                })
+                .then((t) => t.present());
+            }
+          });
+        },
+        error: (err) => {
+          this.isClaiming.set(false);
+          this.toastCtrl
+            .create({
+              message: 'Error al registrar usuario: ' + (err.error?.error || err.message || 'Error desconocido'),
+              duration: 3000,
+              color: 'danger'
+            })
+            .then((t) => t.present());
+        }
+      });
     }
   }
 

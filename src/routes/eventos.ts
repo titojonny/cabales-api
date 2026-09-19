@@ -10,7 +10,7 @@ import {
   eliminarConsumo,
   agregarPropina
 } from '../controllers/consumos.js';
-import { agregarParticipante } from '../controllers/participantes.js';
+import { agregarParticipante, reclamarParticipante } from '../controllers/participantes.js';
 import { validateBody } from '../middlewares/validateBody.js';
 import { requireEventoAbierto } from '../middlewares/requireEventoAbierto.js';
 import { assertParamId } from '../middlewares/assertParamId.js';
@@ -20,7 +20,7 @@ import {
   actualizarConsumoSchema,
   agregarPropinaSchema
 } from '../validators/consumos.js';
-import { agregarParticipanteSchema } from '../validators/participantes.js';
+import { agregarParticipanteSchema, reclamarParticipanteSchema } from '../validators/participantes.js';
 import { crearEventoSchema } from '../validators/schemas.js';
 
 const router = Router();
@@ -38,6 +38,15 @@ router.post(
   requireEventoAbierto,
   validateBody(agregarParticipanteSchema),
   agregarParticipante
+);
+
+// Reclamar un lugar de comensal en la mesa (vincular a usuario registrado)
+router.patch(
+  '/events/:id/participants/:participantId/claim',
+  assertParamId('evento'),
+  requireEventoAbierto,
+  validateBody(reclamarParticipanteSchema),
+  reclamarParticipante
 );
 
 // Listar consumos detallados de un evento

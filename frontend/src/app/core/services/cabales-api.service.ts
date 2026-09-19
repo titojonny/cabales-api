@@ -49,6 +49,12 @@ export class CabalesApiService {
       .pipe(map((res) => res.data));
   }
 
+  actualizarUsuario(usuarioId: string, body: { nombre?: string; avatar_url?: string }): Observable<UsuarioDTO> {
+    return this.http
+      .patch<ApiResponse<UsuarioDTO>>(`${this.baseUrl}/users/${usuarioId}`, body)
+      .pipe(map((res) => res.data));
+  }
+
   // --- EVENTOS ---
 
   crearEvento(nombre: string, creadorId: string): Observable<EventoDTO> {
@@ -75,6 +81,18 @@ export class CabalesApiService {
   ): Observable<any> {
     return this.http
       .post<ApiResponse<any>>(`${this.baseUrl}/events/${eventoId}/participants`, data)
+      .pipe(map((res) => res.data));
+  }
+
+  reclamarParticipante(
+    eventoId: string,
+    participanteId: string,
+    usuarioId: string
+  ): Observable<any> {
+    return this.http
+      .patch<ApiResponse<any>>(`${this.baseUrl}/events/${eventoId}/participants/${participanteId}/claim`, {
+        usuario_id: usuarioId
+      })
       .pipe(map((res) => res.data));
   }
 

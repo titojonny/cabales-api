@@ -15,3 +15,7 @@ export const agregarParticipanteSchema = z
     message: 'No puedes enviar un usuario registrado y un invitado fantasma al mismo tiempo.',
     path: ['nombre_invitado']
   });
+
+export const reclamarParticipanteSchema = z.object({
+  usuario_id: z.string({ message: 'El usuario_id es obligatorio' }).uuid('El ID de usuario debe ser un UUID válido')
+});

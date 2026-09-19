@@ -41,6 +41,7 @@ import {
   arrowBackOutline
 } from 'ionicons/icons';
 import { CabalesApiService } from '../../core/services/cabales-api.service';
+import { AuthService } from '../../core/services/auth.service';
 import { TransaccionDTO, EstadoTransaccion, EventoDetalleDTO } from '../../core/models/cabales.models';
 import { CentavosADineroPipe } from '../../shared/pipes/centavos-a-dinero.pipe';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
@@ -1458,6 +1459,7 @@ export class SettlementPage implements OnInit, ViewWillEnter {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private api = inject(CabalesApiService);
+  private auth = inject(AuthService);
   private toastCtrl = inject(ToastController);
 
   eventId = signal<string>('');
@@ -1689,6 +1691,9 @@ export class SettlementPage implements OnInit, ViewWillEnter {
   // --- COBRO POR WHATSAPP ---
 
   openWhatsAppModal(): void {
+    if (!this.datosBancarios()) {
+      this.datosBancarios.set(this.auth.getDatosBancarios());
+    }
     this.isWhatsAppModalOpen.set(true);
   }
 
@@ -1697,7 +1702,9 @@ export class SettlementPage implements OnInit, ViewWillEnter {
   }
 
   onDatosBancariosChange(event: any): void {
-    this.datosBancarios.set(event.target.value || '');
+    const val = event.target.value || '';
+    this.datosBancarios.set(val);
+    this.auth.setDatosBancarios(val);
   }
 
   async sendWhatsApp(): Promise<void> {

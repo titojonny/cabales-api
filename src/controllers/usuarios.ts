@@ -97,3 +97,35 @@ export const obtenerEventosDeUsuario = async (req: Request, res: Response, next:
     next(error);
   }
 };
+
+// PATCH /api/users/:id — Actualizar perfil de usuario (nombre o avatar)
+export const actualizarUsuario = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const usuarioId = assertParamId(req.params.id, 'usuario');
+    const { nombre, avatar_url } = req.body as { nombre?: string; avatar_url?: string };
+
+    const existe = await prisma.usuario.findUnique({
+      where: { id: usuarioId }
+    });
+    if (!existe) {
+      throw new HttpError(404, 'El usuario no existe');
+    }
+
+    const dataToUpdate: { nombre?: string; avatar_url?: string } = {};
+    if (nombre !== undefined) dataToUpdate.nombre = nombre.trim();
+    if (avatar_url !== undefined) dataToUpdate.avatar_url = avatar_url;
+
+    const actualizado = await prisma.usuario.update({
+      where: { id: usuarioId },
+      data: dataToUpdate
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Perfil de usuario actualizado exitosamente',
+      data: actualizado
+    });
+  } catch (error) {
+    next(error);
+  }
+};
