@@ -25,8 +25,8 @@ import { CommonModule } from '@angular/common';
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       padding: 4px 10px 4px 6px;
       border-radius: 9999px;
     }
@@ -35,17 +35,18 @@ import { CommonModule } from '@angular/common';
       width: 28px;
       height: 28px;
       border-radius: 50%;
-      background: rgba(99, 102, 241, 0.2);
+      background: #4DBE55;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 0.85rem;
       font-weight: 700;
-      color: var(--ion-color-secondary-tint);
+      color: #141F14;
     }
 
     .is-ghost .avatar-box {
-      background: rgba(245, 158, 11, 0.2);
+      background: rgba(113, 119, 109, 0.5);
+      color: #F1F1F1;
     }
 
     .ghost-emoji {
@@ -61,19 +62,19 @@ import { CommonModule } from '@angular/common';
     .name-text {
       font-size: 0.85rem;
       font-weight: 600;
-      color: #F1F5F9;
+      color: #F1F1F1;
     }
 
     .type-label {
       font-size: 0.65rem;
-      color: #94A3B8;
+      color: #BEBEBE;
     }
   `]
 })
 export class ParticipantBadgeComponent {
   @Input() name = '';
   @Input() isGhost = false;
-
+  
   get initial(): string {
     return this.name ? this.name.charAt(0).toUpperCase() : '?';
   }

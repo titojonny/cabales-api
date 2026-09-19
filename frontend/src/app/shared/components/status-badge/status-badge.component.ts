@@ -32,39 +32,39 @@ import { CommonModule } from '@angular/common';
     }
 
     .status-activo {
-      background: rgba(16, 185, 129, 0.15);
-      color: #34D399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      background: rgba(77, 190, 85, 0.16);
+      color: #79ED91;
+      border: 1px solid rgba(77, 190, 85, 0.4);
     }
 
     .status-cerrado {
-      background: rgba(148, 163, 184, 0.15);
-      color: #94A3B8;
-      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: rgba(113, 119, 109, 0.2);
+      color: #BEBEBE;
+      border: 1px solid rgba(113, 119, 109, 0.35);
     }
 
     .status-pendiente {
-      background: rgba(245, 158, 11, 0.15);
-      color: #FBBF24;
-      border: 1px solid rgba(245, 158, 11, 0.3);
+      background: rgba(239, 68, 68, 0.16);
+      color: #FCA5A5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
     }
 
     .status-en_revision {
-      background: rgba(59, 130, 246, 0.15);
-      color: #60A5FA;
-      border: 1px solid rgba(59, 130, 246, 0.3);
+      background: rgba(105, 134, 150, 0.2);
+      color: #F1F1F1;
+      border: 1px solid rgba(105, 134, 150, 0.4);
     }
 
     .status-completado {
-      background: rgba(16, 185, 129, 0.15);
-      color: #34D399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      background: rgba(121, 237, 145, 0.16);
+      color: #79ED91;
+      border: 1px solid rgba(121, 237, 145, 0.4);
     }
 
     .status-en_disputa {
-      background: rgba(239, 68, 68, 0.15);
-      color: #F87171;
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      background: rgba(239, 68, 68, 0.2);
+      color: #FCA5A5;
+      border: 1px solid rgba(239, 68, 68, 0.45);
     }
   `]
 })

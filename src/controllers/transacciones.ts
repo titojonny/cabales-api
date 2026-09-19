@@ -6,6 +6,7 @@ import { assertParamId } from '../middlewares/assertParamId.js';
 import { mapearParticipante } from '../utils/participante.js';
 import { actualizarEstadoTransaccionSchema } from '../validators/transacciones.js';
 import { esTransicionPermitida, SIETE_DIAS_MS } from '../utils/settlement.js';
+import { storage } from '../services/storage.js';
 
 type CuerpoEstado = z.infer<typeof actualizarEstadoTransaccionSchema>;
 
@@ -51,18 +52,7 @@ export const obtenerTransaccionesDeEvento = async (req: Request, res: Response, 
 export const actualizarEstadoTransaccion = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const transaccionId = assertParamId(req.params.id, 'transacción');
-
-    const parse = actualizarEstadoTransaccionSchema.safeParse(req.body);
-    if (!parse.success) {
-      res.status(400).json({
-        success: false,
-        message: 'Datos inválidos',
-        error: parse.error.issues.map((issue) => issue.message)
-      });
-      return;
-    }
-
-    const { estado: nuevoEstado, comprobante_url } = parse.data;
+    const { estado: nuevoEstado, comprobante_url } = req.body as CuerpoEstado;
 
     const transaccion = await prisma.transaccion.findUnique({ where: { id: transaccionId } });
     if (!transaccion) {
@@ -115,7 +105,7 @@ export const subirComprobanteTransaccion = async (req: Request, res: Response, n
       throw new HttpError(409, `No se puede subir comprobante: la transacción está en estado ${transaccion.estado}`);
     }
 
-    const comprobanteUrl = `/uploads/comprobantes/${req.file.filename}`;
+    const { url: comprobanteUrl } = await storage.upload(req.file, 'comprobantes');
 
     const actualizada = await prisma.transaccion.update({
       where: { id: transaccionId },

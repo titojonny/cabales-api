@@ -5,7 +5,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 // --- ENUMS DE ESTADO ---
@@ -51,6 +51,7 @@ model Evento {
   creador       Usuario        @relation(fields: [creador_id], references: [id])
   participantes Participante[]
   transacciones Transaccion[]
+  consumos      Consumo[]
 
   @@index([creador_id])
 }
@@ -72,8 +73,9 @@ model Participante {
   usuario Usuario? @relation(fields: [usuario_id], references: [id])
 
   // Relaciones Nombradas
-  deudas_a_pagar  Transaccion[] @relation("DeudorRelacion")
-  deudas_a_cobrar Transaccion[] @relation("AcreedorRelacion")
+  deudas_a_pagar      Transaccion[]         @relation("DeudorRelacion")
+  deudas_a_cobrar     Transaccion[]         @relation("AcreedorRelacion")
+  consumos_asociados  ConsumoParticipante[]
 
   @@index([evento_id])
   @@index([usuario_id])
@@ -105,4 +107,35 @@ model Transaccion {
   @@index([evento_id])
   @@index([deudor_id])
   @@index([acreedor_id])
+}
+
+model Consumo {
+  id             String   @id @default(uuid())
+  evento_id      String
+  descripcion    String? // Ej. "Pizza Suprema", "2 Cubetazos", "Nachos"
+  monto_centavos Int
+
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
+
+  // Relaciones
+  evento        Evento                @relation(fields: [evento_id], references: [id], onDelete: Cascade)
+  participantes ConsumoParticipante[]
+
+  @@index([evento_id])
+}
+
+model ConsumoParticipante {
+  id              String @id @default(uuid())
+  consumo_id      String
+  participante_id String
+  monto_centavos  Int // Cuánto le correspondió de este consumo específico en centavos exactos
+
+  // Relaciones
+  consumo      Consumo      @relation(fields: [consumo_id], references: [id], onDelete: Cascade)
+  participante Participante @relation(fields: [participante_id], references: [id], onDelete: Cascade)
+
+  @@unique([consumo_id, participante_id])
+  @@index([consumo_id])
+  @@index([participante_id])
 }

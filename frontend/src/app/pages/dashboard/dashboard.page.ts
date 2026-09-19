@@ -297,7 +297,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
   `,
   styles: [`
     .cabales-toolbar {
-      --background: #080C14;
+      --background: var(--ion-toolbar-background);
       --border-width: 0;
       padding: 8px 16px;
     }
@@ -316,9 +316,9 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .brand-badge {
-      background: rgba(16, 185, 129, 0.15);
-      color: #34D399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      background: rgba(77, 190, 85, 0.16);
+      color: #79ED91;
+      border: 1px solid rgba(77, 190, 85, 0.35);
       font-size: 0.65rem;
       font-weight: 800;
       padding: 2px 6px;
@@ -330,15 +330,15 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       font-family: 'Outfit', sans-serif;
       font-size: 1.6rem;
       font-weight: 800;
-      color: #F8FAFC;
+      color: #F1F1F1;
       margin: 0;
       letter-spacing: -0.03em;
     }
 
     .user-pill {
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: #F1F5F9;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      color: #F1F1F1;
       border-radius: 9999px;
       padding: 6px 12px;
       display: flex;
@@ -350,22 +350,22 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
       ion-icon {
         font-size: 1.1rem;
-        color: var(--ion-color-primary);
+        color: #79ED91;
       }
     }
 
     .dashboard-content {
-      --background: #080C14;
+      --background: var(--ion-background-color);
       padding: 16px;
     }
 
     .hero-stats-card {
-      background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(99, 102, 241, 0.15) 100%);
-      border: 1px solid rgba(16, 185, 129, 0.25);
+      background: rgba(33, 38, 32, 0.85);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 24px;
       padding: 24px 20px;
       margin: 8px 16px 20px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     }
 
     .stats-top {
@@ -377,39 +377,41 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
     .stats-label {
       font-size: 0.85rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
 
     .active-tables-pill {
-      background: rgba(16, 185, 129, 0.2);
-      color: #34D399;
+      background: rgba(77, 190, 85, 0.2);
+      color: #79ED91;
       font-size: 0.75rem;
       font-weight: 700;
       padding: 2px 8px;
       border-radius: 9999px;
+      border: 1px solid #4DBE55;
     }
 
     .stats-amount {
       font-size: 2.75rem;
       font-weight: 800;
-      color: #F8FAFC;
+      color: #F1F1F1;
       line-height: 1.1;
       margin-bottom: 8px;
     }
 
     .stats-subtext {
       font-size: 0.82rem;
-      color: #64748B;
+      color: #BEBEBE;
     }
 
     .segment-wrapper {
       padding: 0 16px 16px;
 
       ion-segment {
-        --background: rgba(255, 255, 255, 0.05);
+        --background: rgba(0, 0, 0, 0.25);
+        border: 1px solid rgba(113, 119, 109, 0.35);
         border-radius: 14px;
         padding: 4px;
       }
@@ -426,8 +428,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .event-card-item {
-      background: #0E1626;
-      border: 1px solid rgba(255, 255, 255, 0.07);
+      background: rgba(33, 38, 32, 0.75);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 20px;
       padding: 16px 18px;
       cursor: pointer;
@@ -435,7 +437,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
       &:active {
         transform: scale(0.985);
-        background: #1A243C;
+        background: rgba(33, 38, 32, 0.95);
       }
     }
 
@@ -450,7 +452,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       font-family: 'Outfit', sans-serif;
       font-size: 1.15rem;
       font-weight: 700;
-      color: #F8FAFC;
+      color: #F1F1F1;
       margin: 0 0 6px;
     }
 
@@ -466,12 +468,13 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       align-items: center;
       gap: 4px;
       font-size: 0.75rem;
-      color: #94A3B8;
+      color: #BEBEBE;
     }
 
     .creator-badge {
-      background: rgba(99, 102, 241, 0.15);
-      color: #818CF8;
+      background: rgba(77, 190, 85, 0.16);
+      color: #79ED91;
+      border: 1px solid rgba(77, 190, 85, 0.35);
       font-size: 0.7rem;
       font-weight: 600;
       padding: 2px 6px;
@@ -479,8 +482,9 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .guest-badge {
-      background: rgba(255, 255, 255, 0.05);
-      color: #94A3B8;
+      background: rgba(0, 0, 0, 0.25);
+      color: #BEBEBE;
+      border: 1px solid rgba(113, 119, 109, 0.35);
       font-size: 0.7rem;
       padding: 2px 6px;
       border-radius: 4px;
@@ -489,9 +493,9 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     .pending-tx-badge {
       font-size: 0.68rem;
       font-weight: 700;
-      color: #FCD34D;
-      background: rgba(245, 158, 11, 0.14);
-      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #FCA5A5;
+      background: rgba(239, 68, 68, 0.16);
+      border: 1px solid rgba(239, 68, 68, 0.4);
       padding: 2px 7px;
       border-radius: 9999px;
       display: inline-flex;
@@ -500,7 +504,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
     .event-card-divider {
       height: 1px;
-      background: rgba(255, 255, 255, 0.06);
+      background: rgba(113, 119, 109, 0.3);
       margin: 14px 0 12px;
     }
 
@@ -515,10 +519,10 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       align-items: center;
       gap: 6px;
       font-size: 0.85rem;
-      color: #94A3B8;
+      color: #BEBEBE;
 
       ion-icon {
-        color: var(--ion-color-secondary-tint);
+        color: #BEBEBE;
       }
     }
 
@@ -530,13 +534,13 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
     .spending-label {
       font-size: 0.75rem;
-      color: #64748B;
+      color: #BEBEBE;
     }
 
     .spending-value {
       font-size: 1.1rem;
       font-weight: 700;
-      color: var(--ion-color-primary);
+      color: #F1F1F1;
     }
 
     .history-badge {
@@ -548,42 +552,44 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       align-items: center;
 
       &.saldado {
-        background: rgba(16, 185, 129, 0.15);
-        color: #34D399;
-        border: 1px solid rgba(16, 185, 129, 0.3);
+        background: rgba(121, 237, 145, 0.16);
+        color: #79ED91;
+        border: 1px solid rgba(121, 237, 145, 0.4);
       }
 
       &.pendiente {
-        background: rgba(245, 158, 11, 0.15);
-        color: #FBBF24;
-        border: 1px solid rgba(245, 158, 11, 0.3);
+        background: rgba(239, 68, 68, 0.16);
+        color: #FCA5A5;
+        border: 1px solid rgba(239, 68, 68, 0.4);
       }
     }
 
     .loading-state, .empty-state {
       text-align: center;
       padding: 40px 20px;
-      color: #94A3B8;
+      color: #BEBEBE;
     }
 
     .empty-icon-box {
       width: 60px;
       height: 60px;
       border-radius: 50%;
-      background: rgba(16, 185, 129, 0.1);
+      background: rgba(77, 190, 85, 0.15);
+      border: 1px solid rgba(77, 190, 85, 0.35);
       display: flex;
       align-items: center;
       justify-content: center;
       margin: 0 auto 16px;
-      color: var(--ion-color-primary);
+      color: #79ED91;
       font-size: 1.8rem;
     }
 
     .modal-wrapper {
-      background: #151D30;
+      background: #212620;
       padding: 24px;
       height: 100%;
-      color: #F8FAFC;
+      color: #F1F1F1;
+      border: 1px solid rgba(113, 119, 109, 0.35);
     }
 
     .modal-header {
@@ -596,20 +602,25 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         font-family: 'Outfit', sans-serif;
         font-size: 1.4rem;
         font-weight: 800;
+        color: #F1F1F1;
         margin: 0;
       }
 
       .close-btn {
         background: transparent;
         border: none;
-        color: #94A3B8;
+        color: #BEBEBE;
         font-size: 1.2rem;
         cursor: pointer;
+
+        &:hover {
+          color: #F1F1F1;
+        }
       }
     }
 
     .modal-desc {
-      color: #94A3B8;
+      color: #BEBEBE;
       font-size: 0.9rem;
       margin-bottom: 20px;
       line-height: 1.4;
@@ -619,8 +630,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       display: flex;
       align-items: center;
       gap: 12px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 14px;
       padding: 12px 16px;
       margin-bottom: 24px;
@@ -629,12 +640,13 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         margin: 0;
         font-size: 1rem;
         font-weight: 700;
+        color: #F1F1F1;
       }
 
       p {
         margin: 2px 0 0;
         font-size: 0.8rem;
-        color: #94A3B8;
+        color: #BEBEBE;
       }
     }
 
@@ -642,20 +654,20 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       width: 44px;
       height: 44px;
       border-radius: 50%;
-      background: linear-gradient(135deg, #10B981 0%, #6366F1 100%);
+      background: #4DBE55;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 800;
       font-size: 1.2rem;
-      color: #ffffff;
+      color: #141F14;
     }
 
     .section-subheading {
       font-size: 0.9rem;
       font-weight: 700;
       margin: 16px 0 10px;
-      color: #E2E8F0;
+      color: #F1F1F1;
     }
 
     .modal-actions {
@@ -714,33 +726,47 @@ export class DashboardPage implements OnInit, ViewWillEnter {
   }
 
   ngOnInit(): void {
-    this.ensureUserAndLoadEvents();
+    // La carga se realiza exclusivamente en ionViewWillEnter para evitar llamadas duplicadas en Ionic
   }
 
   ionViewWillEnter(): void {
-    const user = this.currentUser();
-    if (user && user.id && user.id !== 'default-user-id') {
-      this.loadEvents(user.id);
-    }
+    this.ensureUserAndLoadEvents();
   }
 
   private ensureUserAndLoadEvents(): void {
     const user = this.currentUser();
-    if (!user || !user.id || user.id === 'default-user-id') {
-      // Registrar usuario de desarrollo por defecto si aún no existe
-      this.api.crearUsuario('Jonathan', 'jonathan@ufg.edu.sv').subscribe({
-        next: (created) => {
-          this.auth.setCurrentUser(created);
-          this.loadEvents(created.id);
-        },
-        error: () => {
-          // Si ya existe (409) o error, intentar cargar
-          this.loadEvents(this.currentUserId());
-        }
-      });
-    } else {
+    if (user && user.id) {
       this.loadEvents(user.id);
+      return;
     }
+
+    this.isLoading.set(true);
+    // 1. Consultar si ya existen usuarios registrados en la base de datos
+    this.api.obtenerUsuarios().subscribe({
+      next: (usuarios) => {
+        if (usuarios && usuarios.length > 0) {
+          // Si ya existe Jonathan o cualquier usuario, usarlo con su UUID real
+          const preferido =
+            usuarios.find((u) => u.email.toLowerCase() === 'jonathan@ufg.edu.sv') || usuarios[0];
+          this.auth.setCurrentUser(preferido);
+          this.loadEvents(preferido.id);
+        } else {
+          // Si la BD está totalmente limpia, crear el primer usuario de desarrollo
+          this.api.crearUsuario('Jonathan', 'jonathan@ufg.edu.sv').subscribe({
+            next: (created) => {
+              this.auth.setCurrentUser(created);
+              this.loadEvents(created.id);
+            },
+            error: () => {
+              this.isLoading.set(false);
+            }
+          });
+        }
+      },
+      error: () => {
+        this.isLoading.set(false);
+      }
+    });
   }
 
   loadEvents(userId?: string): void {
@@ -833,6 +859,37 @@ export class DashboardPage implements OnInit, ViewWillEnter {
           duration: 2000,
           color: 'success'
         }).then((t) => t.present());
+      },
+      error: () => {
+        // Si el usuario ya existe (HTTP 409), recuperarlo de la lista y cambiar a él
+        this.api.obtenerUsuarios().subscribe({
+          next: (usuarios) => {
+            const found = usuarios.find((u) => u.email.toLowerCase() === email.toLowerCase());
+            if (found) {
+              this.auth.setCurrentUser(found);
+              this.closeUserModal();
+              this.loadEvents(found.id);
+              this.toast.create({
+                message: `Cambiado al usuario existente: ${found.nombre}`,
+                duration: 2500,
+                color: 'primary'
+              }).then((t) => t.present());
+            } else {
+              this.toast.create({
+                message: 'No se pudo crear ni encontrar el usuario',
+                duration: 3000,
+                color: 'warning'
+              }).then((t) => t.present());
+            }
+          },
+          error: () => {
+            this.toast.create({
+              message: 'Error de conexión al buscar usuario',
+              duration: 3000,
+              color: 'danger'
+            }).then((t) => t.present());
+          }
+        });
       }
     });
   }

@@ -17,6 +17,7 @@ import {
   ToastController,
   ViewWillEnter
 } from '@ionic/angular';
+import { forkJoin } from 'rxjs';
 import { addIcons } from 'ionicons';
 import {
   arrowForwardOutline,
@@ -33,12 +34,17 @@ import {
   cameraOutline,
   trashOutline,
   swapHorizontalOutline,
-  openOutline
+  openOutline,
+  logoWhatsapp,
+  copyOutline,
+  shareSocialOutline,
+  arrowBackOutline
 } from 'ionicons/icons';
 import { CabalesApiService } from '../../core/services/cabales-api.service';
-import { TransaccionDTO, EstadoTransaccion } from '../../core/models/cabales.models';
+import { TransaccionDTO, EstadoTransaccion, EventoDetalleDTO } from '../../core/models/cabales.models';
 import { CentavosADineroPipe } from '../../shared/pipes/centavos-a-dinero.pipe';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
+import { generarMensajeCobroWhatsApp, compartirTexto, copiarTextoAlPortapapeles } from '../../core/utils/whatsapp-share';
 
 @Component({
   selector: 'app-settlement',
@@ -48,7 +54,6 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     FormsModule,
     IonHeader,
     IonToolbar,
-    IonTitle,
     IonButtons,
     IonBackButton,
     IonContent,
@@ -62,10 +67,20 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
   template: `
     <ion-header class="ion-no-border">
       <ion-toolbar class="cabales-toolbar">
-        <ion-buttons slot="start">
-          <ion-back-button [defaultHref]="'/events/' + eventId()" text="" color="light"></ion-back-button>
-        </ion-buttons>
-        <ion-title class="header-title">Liquidación de Mesa</ion-title>
+        <div class="custom-nav-bar">
+          <ion-buttons slot="start" class="nav-start">
+            <ion-back-button [defaultHref]="'/events/' + eventId()" text="" color="light"></ion-back-button>
+          </ion-buttons>
+          <div class="nav-center-title">
+            <span class="nav-title-text">Liquidación de Mesa</span>
+          </div>
+          <div class="nav-end">
+            <button type="button" class="header-wa-pill" (click)="openWhatsAppModal()" title="Cobrar por WhatsApp">
+              <ion-icon name="logo-whatsapp"></ion-icon>
+              <span>Cobrar</span>
+            </button>
+          </div>
+        </div>
       </ion-toolbar>
     </ion-header>
 
@@ -75,7 +90,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
           <ion-spinner name="crescent" color="primary"></ion-spinner>
           <p>Calculando transferencias mínimas...</p>
         </div>
-      } @else {
+      } @else if (evento()) {
         <!-- Celebratory or In-Progress Hero Banner -->
         <div class="hero-settlement-card" [class.all-settled]="allCompleted()">
           <div class="settlement-icon-circle">
@@ -92,6 +107,23 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
               <strong>{{ transactions().length }} transferencias</strong>.
             }
           </p>
+        </div>
+
+        <!-- Banner Interactivo de Cobro por WhatsApp -->
+        <div class="whatsapp-cobro-banner" (click)="openWhatsAppModal()">
+          <div class="wa-banner-left">
+            <div class="wa-bubble-icon">
+              <ion-icon name="logo-whatsapp"></ion-icon>
+            </div>
+            <div class="wa-banner-text">
+              <span class="wa-banner-title">Cobrar al Grupo</span>
+              <span class="wa-banner-subtitle">Envía el desglose de deudas y tu cuenta bancaria</span>
+            </div>
+          </div>
+          <button type="button" class="wa-banner-btn">
+            <span>Cobrar</span>
+            <ion-icon name="arrow-forward-outline"></ion-icon>
+          </button>
         </div>
 
         <!-- Transactions List -->
@@ -207,6 +239,16 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
               }
             </div>
           }
+        </div>
+      } @else {
+        <div class="error-state-card">
+          <div class="error-icon-box">⚠️</div>
+          <h3 class="error-title">No pudimos cargar la liquidación</h3>
+          <p class="error-desc">Es posible que la mesa aún no esté cerrada o haya un problema de conexión.</p>
+          <button type="button" class="btn-return-home" (click)="goToEventDetail()">
+            <ion-icon name="arrow-back-outline"></ion-icon>
+            <span>Volver a la Mesa</span>
+          </button>
         </div>
       }
 
@@ -355,44 +397,163 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
           </div>
         </ng-template>
       </ion-modal>
+
+      <!-- MODAL DE COBRO POR WHATSAPP -->
+      <ion-modal [isOpen]="isWhatsAppModalOpen()" (didDismiss)="closeWhatsAppModal()" class="cabales-modal whatsapp-cobro-modal">
+        <ng-template>
+          <div class="modal-wrapper">
+            <div class="modal-header">
+              <div class="assistant-header-text">
+                <h2>Cobro por WhatsApp</h2>
+                <span class="assistant-sub">Genera y envía el desglose de deudas al grupo</span>
+              </div>
+              <button type="button" class="close-btn" (click)="closeWhatsAppModal()">✕</button>
+            </div>
+
+            <div class="modal-body-content">
+              <!-- Entrada de datos bancarios -->
+              <div class="bank-details-group">
+                <label class="input-label" for="bank-input">
+                  Datos de transferencia o cuenta bancaria (opcional):
+                </label>
+                <textarea
+                  id="bank-input"
+                  class="bank-textarea"
+                  rows="3"
+                  placeholder="Ej: Banco Agrícola Cta. Ahorro: 000-000000-00 a nombre de Juan Pérez / Chivo Wallet: 7777-8888 / DUI: 00000000-0"
+                  [value]="datosBancarios()"
+                  (input)="onDatosBancariosChange($event)"
+                ></textarea>
+                <span class="input-hint">Estos datos se incluirán automáticamente en el mensaje de cobro.</span>
+              </div>
+
+              <!-- Preview del Mensaje -->
+              <div class="wa-preview-section">
+                <span class="preview-header-label">
+                  <ion-icon name="logo-whatsapp"></ion-icon>
+                  Vista previa del mensaje:
+                </span>
+                <div class="wa-chat-bubble">
+                  <pre class="wa-message-text">{{ mensajeWhatsAppGenerado() }}</pre>
+                </div>
+              </div>
+
+              <!-- Acciones de Enviar y Copiar -->
+              <div class="wa-modal-actions">
+                <button type="button" class="btn-send-whatsapp" (click)="sendWhatsApp()">
+                  <ion-icon name="logo-whatsapp"></ion-icon>
+                  <span>Abrir en WhatsApp</span>
+                </button>
+                <button type="button" class="btn-copy-message" (click)="copyWhatsAppMessage()">
+                  <ion-icon name="copy-outline"></ion-icon>
+                  <span>Copiar Mensaje</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </ng-template>
+      </ion-modal>
     </ion-content>
   `,
   styles: [`
     .cabales-toolbar {
-      --background: #080C14;
-      padding: 4px 12px;
+      --background: var(--ion-toolbar-background);
+      --padding-start: 4px;
+      --padding-end: 8px;
+      --min-height: 56px;
     }
 
-    .header-title {
+    .custom-nav-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      gap: 8px;
+    }
+
+    .nav-start {
+      flex-shrink: 0;
+    }
+
+    .nav-center-title {
+      flex: 1 1 auto;
+      min-width: 0;
+      text-align: center;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .nav-title-text {
       font-family: 'Outfit', sans-serif;
-      font-size: 1.15rem;
+      font-size: 1.05rem;
       font-weight: 700;
-      color: #F8FAFC;
+      color: #F1F1F1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: block;
+      max-width: 100%;
+    }
+
+    .nav-end {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .header-wa-pill {
+      background: rgba(37, 211, 102, 0.15);
+      border: 1px solid rgba(37, 211, 102, 0.4);
+      color: #79ED91;
+      font-size: 0.76rem;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.15s ease;
+
+      ion-icon {
+        color: #25D366;
+        font-size: 0.95rem;
+      }
+
+      &:active {
+        transform: scale(0.95);
+      }
+
+      &:hover {
+        background: rgba(37, 211, 102, 0.25);
+      }
     }
 
     .settlement-content {
-      --background: #080C14;
+      --background: var(--ion-background-color);
       padding: 16px;
     }
 
     .loading-box {
       text-align: center;
       padding: 60px 20px;
-      color: #94A3B8;
+      color: #BAC8B1;
     }
 
     .hero-settlement-card {
-      background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(16, 185, 129, 0.15) 100%);
-      border: 1px solid rgba(99, 102, 241, 0.25);
+      background: linear-gradient(135deg, rgba(77, 190, 85, 0.15) 0%, rgba(113, 119, 109, 0.25) 100%);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 24px;
       padding: 24px 20px;
       margin: 12px 16px 24px;
       text-align: center;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 
       &.all-settled {
-        background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.2) 100%);
-        border-color: rgba(16, 185, 129, 0.4);
+        background: linear-gradient(135deg, rgba(121, 237, 145, 0.2) 0%, rgba(33, 38, 32, 0.8) 100%);
+        border-color: #4DBE55;
       }
     }
 
@@ -400,8 +561,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       width: 56px;
       height: 56px;
       border-radius: 50%;
-      background: rgba(16, 185, 129, 0.2);
-      color: var(--ion-color-primary);
+      background: rgba(77, 190, 85, 0.2);
+      color: #79ED91;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -413,18 +574,18 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       font-family: 'Outfit', sans-serif;
       font-size: 1.5rem;
       font-weight: 800;
-      color: #F8FAFC;
+      color: #F1F1F1;
       margin: 0 0 6px;
     }
 
     .settlement-subline {
       font-size: 0.85rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       line-height: 1.4;
       margin: 0;
 
       strong {
-        color: var(--ion-color-primary);
+        color: #F1F1F1;
       }
     }
 
@@ -443,34 +604,35 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       font-family: 'Outfit', sans-serif;
       font-size: 1.15rem;
       font-weight: 700;
-      color: #F8FAFC;
+      color: #F1F1F1;
       margin: 0;
     }
 
     .completed-counter {
       font-size: 0.78rem;
       font-weight: 600;
-      color: var(--ion-color-primary);
+      color: #79ED91;
     }
 
     .empty-debts-box {
       text-align: center;
       padding: 36px 24px;
-      background: #0E1626;
-      border: 1px dashed rgba(255, 255, 255, 0.1);
+      background: #212620;
+      border: 1px dashed rgba(113, 119, 109, 0.35);
       border-radius: 20px;
-      color: #94A3B8;
+      color: #BEBEBE;
 
       .empty-icon-circle {
         font-size: 2.2rem;
         margin-bottom: 8px;
+        color: #79ED91;
       }
 
       h4 {
         font-family: 'Outfit', sans-serif;
         font-size: 1.1rem;
         font-weight: 700;
-        color: #F8FAFC;
+        color: #F1F1F1;
         margin: 0 0 6px;
       }
 
@@ -487,16 +649,16 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .tx-flow-card {
-      background: #0E1626;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(33, 38, 32, 0.85);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 20px;
       padding: 16px;
       transition: all 0.2s ease;
 
       &.settled {
         opacity: 0.65;
-        border-color: rgba(16, 185, 129, 0.2);
-        background: rgba(14, 22, 38, 0.6);
+        border-color: rgba(113, 119, 109, 0.25);
+        background: rgba(0, 0, 0, 0.25);
       }
     }
 
@@ -529,7 +691,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       .person-name {
         font-size: 0.82rem;
         font-weight: 700;
-        color: #F8FAFC;
+        color: #F1F1F1;
         text-align: center;
         white-space: nowrap;
         overflow: hidden;
@@ -539,22 +701,22 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
       .person-role {
         font-size: 0.68rem;
-        color: #64748B;
+        color: #BEBEBE;
         text-transform: uppercase;
         letter-spacing: 0.5px;
       }
     }
 
     .debtor-avatar {
-      background: rgba(244, 63, 94, 0.15);
-      color: #FB7185;
-      border: 1px solid rgba(244, 63, 94, 0.3);
+      background: rgba(239, 68, 68, 0.16);
+      color: #FCA5A5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
     }
 
     .creditor-avatar {
-      background: rgba(16, 185, 129, 0.15);
-      color: var(--ion-color-primary);
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      background: rgba(121, 237, 145, 0.16);
+      color: #79ED91;
+      border: 1px solid rgba(121, 237, 145, 0.4);
     }
 
     .amount-arrow-box {
@@ -568,14 +730,14 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         font-family: 'Outfit', sans-serif;
         font-size: 1.15rem;
         font-weight: 800;
-        color: #F8FAFC;
+        color: #F1F1F1;
         margin-bottom: 2px;
       }
 
       .arrow-line {
         display: flex;
         align-items: center;
-        color: #6366F1;
+        color: #BEBEBE;
         font-size: 1.2rem;
       }
     }
@@ -585,7 +747,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       align-items: center;
       justify-content: space-between;
       padding-top: 10px;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 1px solid rgba(113, 119, 109, 0.25);
       margin-bottom: 12px;
     }
 
@@ -597,15 +759,15 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       border-radius: 20px;
       font-size: 0.76rem;
       font-weight: 600;
-      background: rgba(99, 102, 241, 0.15);
-      border: 1px solid rgba(99, 102, 241, 0.3);
-      color: #A5B4FC;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      color: #F1F1F1;
       cursor: pointer;
       transition: all 0.2s ease;
 
       &:hover {
-        background: rgba(99, 102, 241, 0.25);
-        color: #FFFFFF;
+        background: rgba(113, 119, 109, 0.35);
+        color: #F1F1F1;
       }
     }
 
@@ -634,26 +796,27 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .btn-cash {
-      background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #34D399;
+      background: rgba(121, 237, 145, 0.16);
+      border: 1px solid rgba(121, 237, 145, 0.4);
+      color: #79ED91;
     }
 
     .btn-proof {
-      background: rgba(99, 102, 241, 0.15);
-      border: 1px solid rgba(99, 102, 241, 0.3);
-      color: #818CF8;
+      background: rgba(105, 134, 150, 0.2);
+      border: 1px solid rgba(105, 134, 150, 0.4);
+      color: #F1F1F1;
     }
 
     .btn-confirm {
-      background: var(--ion-color-primary);
-      color: #064E3B;
+      background: #4DBE55;
+      color: #141F14;
+      font-weight: 800;
     }
 
     .btn-dispute {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: #F87171;
+      background: rgba(239, 68, 68, 0.16);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #FCA5A5;
     }
 
     .review-helper-box, .dispute-alert-box {
@@ -667,12 +830,14 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
     }
 
     .review-helper-box {
-      background: rgba(59, 130, 246, 0.1);
-      color: #93C5FD;
+      background: rgba(105, 134, 150, 0.18);
+      border: 1px solid rgba(105, 134, 150, 0.35);
+      color: #F1F1F1;
     }
 
     .dispute-alert-box {
-      background: rgba(239, 68, 68, 0.1);
+      background: rgba(239, 68, 68, 0.16);
+      border: 1px solid rgba(239, 68, 68, 0.4);
       color: #FCA5A5;
     }
 
@@ -681,7 +846,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       align-items: center;
       justify-content: center;
       gap: 6px;
-      color: #34D399;
+      color: #79ED91;
       font-size: 0.8rem;
       font-weight: 700;
       padding: 4px 0;
@@ -689,10 +854,10 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
     /* Modal Subir Comprobante */
     .modal-wrapper {
-      background: #151D30;
+      background: #212620;
       padding: 24px;
       height: 100%;
-      color: #F8FAFC;
+      color: #F1F1F1;
       overflow-y: auto;
     }
 
@@ -707,14 +872,19 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         font-size: 1.25rem;
         font-weight: 800;
         margin: 0;
+        color: #F1F1F1;
       }
 
       .close-btn {
         background: transparent;
         border: none;
-        color: #94A3B8;
+        color: #BEBEBE;
         font-size: 1.2rem;
         cursor: pointer;
+
+        &:hover {
+          color: #F1F1F1;
+        }
       }
     }
 
@@ -725,20 +895,20 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
       .modal-title-icon {
         font-size: 1.3rem;
-        color: var(--ion-color-primary);
+        color: #4DBE55;
       }
     }
 
     .modal-desc {
-      color: #94A3B8;
+      color: #BEBEBE;
       font-size: 0.85rem;
       margin-bottom: 16px;
       line-height: 1.4;
     }
 
     .dropzone-box {
-      border: 2px dashed rgba(99, 102, 241, 0.4);
-      background: rgba(15, 23, 42, 0.6);
+      border: 2px dashed rgba(113, 119, 109, 0.45);
+      background: rgba(0, 0, 0, 0.25);
       border-radius: 18px;
       padding: 32px 16px;
       text-align: center;
@@ -750,8 +920,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       transition: all 0.25s ease;
 
       &:hover, &.drag-over {
-        border-color: var(--ion-color-primary);
-        background: rgba(16, 185, 129, 0.08);
+        border-color: #4DBE55;
+        background: rgba(77, 190, 85, 0.15);
         transform: translateY(-2px);
       }
 
@@ -759,8 +929,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         width: 52px;
         height: 52px;
         border-radius: 50%;
-        background: rgba(99, 102, 241, 0.2);
-        color: #818CF8;
+        background: rgba(77, 190, 85, 0.16);
+        color: #79ED91;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -772,12 +942,12 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         font-family: 'Outfit', sans-serif;
         font-weight: 700;
         font-size: 0.95rem;
-        color: #F8FAFC;
+        color: #F1F1F1;
       }
 
       .dropzone-sub {
         font-size: 0.8rem;
-        color: #94A3B8;
+        color: #BEBEBE;
       }
 
       .dropzone-tags {
@@ -789,22 +959,23 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
           font-size: 0.7rem;
           padding: 3px 8px;
           border-radius: 6px;
-          background: rgba(255, 255, 255, 0.06);
-          color: #94A3B8;
+          background: rgba(0, 0, 0, 0.25);
+          border: 1px solid rgba(113, 119, 109, 0.35);
+          color: #BEBEBE;
         }
       }
     }
 
     .preview-card {
-      background: #0E1626;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #212620;
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 16px;
       overflow: hidden;
 
       .preview-image-wrap {
         width: 100%;
         max-height: 220px;
-        background: #080C14;
+        background: rgba(0, 0, 0, 0.3);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -832,7 +1003,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
           .file-name {
             font-size: 0.82rem;
             font-weight: 600;
-            color: #F8FAFC;
+            color: #F1F1F1;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -841,7 +1012,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
           .file-size {
             font-size: 0.74rem;
-            color: #94A3B8;
+            color: #BEBEBE;
           }
         }
 
@@ -861,13 +1032,15 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
             cursor: pointer;
 
             &.change-btn {
-              background: rgba(99, 102, 241, 0.15);
-              color: #A5B4FC;
+              background: rgba(0, 0, 0, 0.25);
+              border: 1px solid rgba(113, 119, 109, 0.35);
+              color: #BEBEBE;
             }
 
             &.remove-btn {
-              background: rgba(239, 68, 68, 0.15);
-              color: #F87171;
+              background: rgba(239, 68, 68, 0.16);
+              border: 1px solid rgba(239, 68, 68, 0.4);
+              color: #FCA5A5;
             }
           }
         }
@@ -878,8 +1051,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       margin-top: 12px;
       padding: 8px 12px;
       border-radius: 8px;
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      background: rgba(239, 68, 68, 0.16);
+      border: 1px solid rgba(239, 68, 68, 0.4);
       color: #FCA5A5;
       font-size: 0.8rem;
       display: flex;
@@ -893,11 +1066,11 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
     /* Lightbox Modal */
     .viewer-wrapper {
-      background: #080C14;
+      background: #212620;
       display: flex;
       flex-direction: column;
       height: 100%;
-      color: #F8FAFC;
+      color: #F1F1F1;
     }
 
     .viewer-header {
@@ -905,27 +1078,32 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       justify-content: space-between;
       align-items: center;
       padding: 18px 20px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid rgba(113, 119, 109, 0.3);
 
       h3 {
         font-family: 'Outfit', sans-serif;
         font-size: 1.15rem;
         font-weight: 700;
         margin: 0 0 2px;
+        color: #F1F1F1;
       }
 
       .viewer-sub {
         font-size: 0.8rem;
-        color: #94A3B8;
+        color: #BEBEBE;
         margin: 0;
       }
 
       .close-btn {
         background: transparent;
         border: none;
-        color: #94A3B8;
+        color: #BEBEBE;
         font-size: 1.2rem;
         cursor: pointer;
+
+        &:hover {
+          color: #F1F1F1;
+        }
       }
     }
 
@@ -942,7 +1120,8 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
       display: flex;
       align-items: center;
       justify-content: center;
-      background: #020408;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 16px;
       overflow: hidden;
       min-height: 280px;
@@ -968,14 +1147,14 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 
         .label {
           font-size: 0.75rem;
-          color: #94A3B8;
+          color: #BEBEBE;
         }
 
         .amount-val {
           font-family: 'Outfit', sans-serif;
           font-size: 1.25rem;
           font-weight: 800;
-          color: var(--ion-color-primary);
+          color: #79ED91;
         }
       }
 
@@ -985,16 +1164,292 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
         gap: 6px;
         padding: 8px 14px;
         border-radius: 10px;
-        background: rgba(255, 255, 255, 0.08);
-        color: #F8FAFC;
+        background: rgba(0, 0, 0, 0.25);
+        border: 1px solid rgba(113, 119, 109, 0.35);
+        color: #F1F1F1;
         text-decoration: none;
         font-size: 0.82rem;
         font-weight: 600;
         transition: background 0.2s;
 
         &:hover {
-          background: rgba(255, 255, 255, 0.15);
+          background: rgba(113, 119, 109, 0.35);
         }
+      }
+    }
+
+    .header-wa-btn {
+      --color: #25D366;
+    }
+
+    /* BANNER DE COBRO POR WHATSAPP */
+    .whatsapp-cobro-banner {
+      background: linear-gradient(135deg, rgba(37, 211, 102, 0.15) 0%, rgba(33, 38, 32, 0.9) 100%);
+      border: 1px solid rgba(37, 211, 102, 0.4);
+      border-radius: 20px;
+      padding: 16px 18px;
+      margin: 0 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      transition: transform 0.15s ease, border-color 0.2s ease;
+
+      &:hover {
+        border-color: #25D366;
+        transform: translateY(-2px);
+      }
+
+      &:active {
+        transform: scale(0.98);
+      }
+    }
+
+    .wa-banner-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .wa-bubble-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: #25D366;
+      color: #141F14;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      flex-shrink: 0;
+      box-shadow: 0 4px 12px rgba(37, 211, 102, 0.35);
+    }
+
+    .wa-banner-text {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .wa-banner-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.98rem;
+      font-weight: 800;
+      color: #F1F1F1;
+    }
+
+    .wa-banner-subtitle {
+      font-size: 0.76rem;
+      color: #BEBEBE;
+      line-height: 1.3;
+    }
+
+    .wa-banner-btn {
+      background: rgba(37, 211, 102, 0.2);
+      border: 1px solid rgba(37, 211, 102, 0.4);
+      color: #79ED91;
+      padding: 8px 14px;
+      border-radius: 9999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: rgba(37, 211, 102, 0.3);
+        color: #F1F1F1;
+      }
+    }
+
+    /* MODAL DE COBRO POR WHATSAPP */
+    .bank-details-group {
+      margin-bottom: 20px;
+    }
+
+    .input-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #F1F1F1;
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .bank-textarea {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(113, 119, 109, 0.4);
+      border-radius: 12px;
+      color: #F1F1F1;
+      padding: 12px;
+      font-size: 0.85rem;
+      font-family: inherit;
+      resize: vertical;
+      box-sizing: border-box;
+
+      &:focus {
+        outline: none;
+        border-color: #4DBE55;
+        box-shadow: 0 0 0 2px rgba(77, 190, 85, 0.25);
+      }
+
+      &::placeholder {
+        color: #71776D;
+      }
+    }
+
+    .input-hint {
+      font-size: 0.74rem;
+      color: #BEBEBE;
+      display: block;
+      margin-top: 6px;
+    }
+
+    .wa-preview-section {
+      margin-bottom: 24px;
+    }
+
+    .preview-header-label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #BEBEBE;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+
+      ion-icon {
+        color: #25D366;
+        font-size: 1rem;
+      }
+    }
+
+    .wa-chat-bubble {
+      background: #1B2B1B;
+      border: 1px solid rgba(37, 211, 102, 0.3);
+      border-radius: 16px;
+      padding: 16px;
+      max-height: 220px;
+      overflow-y: auto;
+      box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    .wa-message-text {
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: #F1F1F1;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+      line-height: 1.45;
+    }
+
+    .wa-modal-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .btn-send-whatsapp {
+      background: #25D366;
+      color: #141F14;
+      border: none;
+      border-radius: 14px;
+      padding: 14px;
+      font-size: 0.95rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(37, 211, 102, 0.35);
+      transition: transform 0.15s ease, filter 0.15s ease;
+
+      ion-icon {
+        font-size: 1.3rem;
+      }
+
+      &:hover {
+        filter: brightness(1.06);
+      }
+
+      &:active {
+        transform: scale(0.98);
+      }
+    }
+
+    .btn-copy-message {
+      background: rgba(0, 0, 0, 0.25);
+      color: #F1F1F1;
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: rgba(113, 119, 109, 0.25);
+      }
+    }
+
+    .error-state-card {
+      margin: 40px 16px;
+      padding: 32px 20px;
+      background: #1B291B;
+      border: 1px solid rgba(113, 119, 109, 0.3);
+      border-radius: 20px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+
+      .error-icon-box {
+        font-size: 2.5rem;
+      }
+
+      .error-title {
+        font-size: 1.2rem;
+        font-weight: 800;
+        color: #F1F1F1;
+        margin: 0;
+      }
+
+      .error-desc {
+        font-size: 0.9rem;
+        color: #BEBEBE;
+        margin: 0 0 12px 0;
+        max-width: 280px;
+        line-height: 1.4;
+      }
+
+      .btn-return-home {
+        background: #4DBE55;
+        color: #141F14;
+        border: none;
+        border-radius: 12px;
+        padding: 12px 20px;
+        font-size: 0.9rem;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
       }
     }
   `]
@@ -1006,8 +1461,18 @@ export class SettlementPage implements OnInit, ViewWillEnter {
   private toastCtrl = inject(ToastController);
 
   eventId = signal<string>('');
+  evento = signal<EventoDetalleDTO | null>(null);
   transactions = signal<TransaccionDTO[]>([]);
   isLoading = signal<boolean>(true);
+
+  // WhatsApp Cobro Modal
+  isWhatsAppModalOpen = signal<boolean>(false);
+  datosBancarios = signal<string>('');
+  mensajeWhatsAppGenerado = computed(() => {
+    const ev = this.evento();
+    if (!ev) return '';
+    return generarMensajeCobroWhatsApp(ev, this.transactions(), this.datosBancarios());
+  });
 
   // Proof Modal
   isProofModalOpen = signal<boolean>(false);
@@ -1047,7 +1512,11 @@ export class SettlementPage implements OnInit, ViewWillEnter {
       cameraOutline,
       trashOutline,
       swapHorizontalOutline,
-      openOutline
+      openOutline,
+      logoWhatsapp,
+      copyOutline,
+      shareSocialOutline,
+      arrowBackOutline
     });
   }
 
@@ -1055,7 +1524,7 @@ export class SettlementPage implements OnInit, ViewWillEnter {
     const id = this.route.snapshot.paramMap.get('id');
     if (id) {
       this.eventId.set(id);
-      this.loadTransactions();
+      // Solo inicializamos el ID; ionViewWillEnter ejecutará la carga real sin duplicados
     }
   }
 
@@ -1070,15 +1539,23 @@ export class SettlementPage implements OnInit, ViewWillEnter {
     if (!id) return;
 
     this.isLoading.set(true);
-    this.api.obtenerTransacciones(id).subscribe({
-      next: (data) => {
-        this.transactions.set(data || []);
+    forkJoin({
+      evento: this.api.obtenerDetalleEvento(id),
+      transacciones: this.api.obtenerTransacciones(id)
+    }).subscribe({
+      next: ({ evento, transacciones }) => {
+        this.evento.set(evento);
+        this.transactions.set(transacciones || []);
         this.isLoading.set(false);
       },
       error: () => {
         this.isLoading.set(false);
       }
     });
+  }
+
+  goToEventDetail(): void {
+    this.router.navigate(['/events', this.eventId()]);
   }
 
   advanceStatusDirect(txId: string, nuevoEstado: EstadoTransaccion): void {
@@ -1208,4 +1685,41 @@ export class SettlementPage implements OnInit, ViewWillEnter {
       }
     });
   }
+
+  // --- COBRO POR WHATSAPP ---
+
+  openWhatsAppModal(): void {
+    this.isWhatsAppModalOpen.set(true);
+  }
+
+  closeWhatsAppModal(): void {
+    this.isWhatsAppModalOpen.set(false);
+  }
+
+  onDatosBancariosChange(event: any): void {
+    this.datosBancarios.set(event.target.value || '');
+  }
+
+  async sendWhatsApp(): Promise<void> {
+    const texto = this.mensajeWhatsAppGenerado();
+    if (!texto) return;
+    const ev = this.evento();
+    await compartirTexto(`Cobro Mesa Cabales: ${ev?.nombre || ''}`, texto);
+  }
+
+  async copyWhatsAppMessage(): Promise<void> {
+    const texto = this.mensajeWhatsAppGenerado();
+    if (!texto) return;
+    const ok = await copiarTextoAlPortapapeles(texto);
+    if (ok) {
+      const toast = await this.toastCtrl.create({
+        message: '¡Mensaje de cobro copiado al portapapeles!',
+        duration: 2500,
+        color: 'success',
+        position: 'top'
+      });
+      await toast.present();
+    }
+  }
 }
+

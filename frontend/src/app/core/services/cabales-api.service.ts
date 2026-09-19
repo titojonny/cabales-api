@@ -15,7 +15,11 @@ import {
   RegistrarPagoDTO,
   AgregarParticipanteDTO,
   ActualizarEstadoTransaccionDTO,
-  CerrarMesaBodyDTO
+  CerrarMesaBodyDTO,
+  ConsumoDTO,
+  ActualizarConsumoDTO,
+  AgregarPropinaDTO,
+  ConsumoRegistradoDTO
 } from '../models/cabales.models';
 
 @Injectable({
@@ -26,6 +30,12 @@ export class CabalesApiService {
   private baseUrl = environment.apiUrl;
 
   // --- USUARIOS ---
+
+  obtenerUsuarios(): Observable<UsuarioDTO[]> {
+    return this.http
+      .get<ApiResponse<UsuarioDTO[]>>(`${this.baseUrl}/users`)
+      .pipe(map((res) => res.data));
+  }
 
   crearUsuario(nombre: string, email: string): Observable<UsuarioDTO> {
     return this.http
@@ -59,7 +69,10 @@ export class CabalesApiService {
 
   // --- PARTICIPANTES ---
 
-  agregarParticipante(eventoId: string, data: AgregarParticipanteDTO): Observable<any> {
+  agregarParticipante(
+    eventoId: string,
+    data: AgregarParticipanteDTO
+  ): Observable<any> {
     return this.http
       .post<ApiResponse<any>>(`${this.baseUrl}/events/${eventoId}/participants`, data)
       .pipe(map((res) => res.data));
@@ -67,9 +80,37 @@ export class CabalesApiService {
 
   // --- CONSUMOS ---
 
-  registrarConsumo(eventoId: string, data: CrearConsumoDTO): Observable<any> {
+  obtenerConsumos(eventoId: string): Observable<ConsumoDTO[]> {
     return this.http
-      .post<ApiResponse<any>>(`${this.baseUrl}/events/${eventoId}/consumptions`, data)
+      .get<ApiResponse<ConsumoDTO[]>>(`${this.baseUrl}/events/${eventoId}/consumptions`)
+      .pipe(map((res) => res.data));
+  }
+
+  registrarConsumo(eventoId: string, data: CrearConsumoDTO): Observable<ConsumoRegistradoDTO> {
+    return this.http
+      .post<ApiResponse<ConsumoRegistradoDTO>>(`${this.baseUrl}/events/${eventoId}/consumptions`, data)
+      .pipe(map((res) => res.data));
+  }
+
+  actualizarConsumo(
+    eventoId: string,
+    consumoId: string,
+    data: ActualizarConsumoDTO
+  ): Observable<ConsumoRegistradoDTO> {
+    return this.http
+      .put<ApiResponse<ConsumoRegistradoDTO>>(`${this.baseUrl}/events/${eventoId}/consumptions/${consumoId}`, data)
+      .pipe(map((res) => res.data));
+  }
+
+  eliminarConsumo(eventoId: string, consumoId: string): Observable<any> {
+    return this.http
+      .delete<ApiResponse<any>>(`${this.baseUrl}/events/${eventoId}/consumptions/${consumoId}`)
+      .pipe(map((res) => res.data));
+  }
+
+  agregarPropina(eventoId: string, data: AgregarPropinaDTO): Observable<ConsumoRegistradoDTO> {
+    return this.http
+      .post<ApiResponse<ConsumoRegistradoDTO>>(`${this.baseUrl}/events/${eventoId}/tip`, data)
       .pipe(map((res) => res.data));
   }
 

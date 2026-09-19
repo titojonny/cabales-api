@@ -2,7 +2,7 @@
 // Elimina duplicación de crearUsuario/crearEvento en múltiples archivos de test
 
 import request from 'supertest';
-import { app } from '../src/app.js';
+import { app } from '../../src/app.js';
 
 export interface UsuarioFixture {
   id: string;

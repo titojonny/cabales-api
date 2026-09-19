@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, signal } from '@angular/core';
+import { Component, Input, Output, EventEmitter, signal, inject, NgZone, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IonIcon } from '@ionic/angular';
 import { addIcons } from 'ionicons';
@@ -56,13 +56,13 @@ import { backspaceOutline } from 'ionicons/icons';
       align-items: baseline;
       justify-content: center;
       margin: 16px 0 20px;
-      color: #F8FAFC;
+      color: #F1F1F1;
     }
 
     .currency-symbol {
       font-size: 2.5rem;
       font-weight: 700;
-      color: var(--ion-color-primary);
+      color: #4DBE55;
       margin-right: 4px;
     }
 
@@ -82,9 +82,9 @@ import { backspaceOutline } from 'ionicons/icons';
     }
 
     .quick-chip {
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: #94A3B8;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.4);
+      color: #BEBEBE;
       font-size: 0.85rem;
       font-weight: 600;
       padding: 6px 14px;
@@ -93,8 +93,8 @@ import { backspaceOutline } from 'ionicons/icons';
       transition: all 0.15s ease;
 
       &:active {
-        background: var(--ion-color-primary);
-        color: #000000;
+        background: #4DBE55;
+        color: #141F14;
         transform: scale(0.95);
       }
     }
@@ -109,10 +109,10 @@ import { backspaceOutline } from 'ionicons/icons';
 
     .keypad-btn {
       height: 56px;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 16px;
-      color: #FFFFFF;
+      color: #F1F1F1;
       font-size: 1.5rem;
       font-weight: 600;
       display: flex;
@@ -123,13 +123,13 @@ import { backspaceOutline } from 'ionicons/icons';
       outline: none;
 
       &:active {
-        background: rgba(16, 185, 129, 0.2);
-        border-color: var(--ion-color-primary);
+        background: rgba(77, 190, 85, 0.2);
+        border-color: #4DBE55;
         transform: scale(0.93);
       }
 
       &.backspace-btn {
-        color: #94A3B8;
+        color: #BEBEBE;
         font-size: 1.6rem;
       }
 
@@ -143,46 +143,63 @@ export class MoneyInputComponent {
   centavos = signal<number>(0);
 
   @Input() set initialCentavos(val: number) {
-    this.centavos.set(val || 0);
+    const newVal = val || 0;
+    if (this.centavos() !== newVal) {
+      this.centavos.set(newVal);
+      this.cdr.detectChanges();
+    }
   }
 
   @Output() centavosChange = new EventEmitter<number>();
+
+  private zone = inject(NgZone);
+  private cdr = inject(ChangeDetectorRef);
 
   constructor() {
     addIcons({ backspaceOutline });
   }
 
   appendDigit(digit: number): void {
-    const current = this.centavos();
-    if (current > 9999999) return; // Limite de $99,999.99
-    const updated = current * 10 + digit;
-    this.centavos.set(updated);
-    this.centavosChange.emit(updated);
+    this.zone.run(() => {
+      const current = this.centavos();
+      if (current === 0 && digit === 0) return;
+      const nextVal = current * 10 + digit;
+      if (nextVal > 99999999) return;
+      this.centavos.set(nextVal);
+      this.centavosChange.emit(nextVal);
+      this.cdr.detectChanges();
+    });
   }
 
   appendDoubleZero(): void {
-    const current = this.centavos();
-    if (current === 0 || current > 999999) return;
-    const updated = current * 100;
-    this.centavos.set(updated);
-    this.centavosChange.emit(updated);
+    this.zone.run(() => {
+      const current = this.centavos();
+      if (current === 0) return;
+      const nextVal = current * 100;
+      if (nextVal > 99999999) return;
+      this.centavos.set(nextVal);
+      this.centavosChange.emit(nextVal);
+      this.cdr.detectChanges();
+    });
   }
 
   deleteDigit(): void {
-    const current = this.centavos();
-    const updated = Math.floor(current / 10);
-    this.centavos.set(updated);
-    this.centavosChange.emit(updated);
+    this.zone.run(() => {
+      const current = this.centavos();
+      const nextVal = Math.floor(current / 10);
+      this.centavos.set(nextVal);
+      this.centavosChange.emit(nextVal);
+      this.cdr.detectChanges();
+    });
   }
 
-  addCents(extra: number): void {
-    const updated = this.centavos() + extra;
-    this.centavos.set(updated);
-    this.centavosChange.emit(updated);
-  }
-
-  reset(): void {
-    this.centavos.set(0);
-    this.centavosChange.emit(0);
+  addCents(amount: number): void {
+    this.zone.run(() => {
+      const nextVal = this.centavos() + amount;
+      if (nextVal > 99999999) return;
+      this.centavos.set(nextVal);
+      this.centavosChange.emit(nextVal);
+      this.cdr.detectChanges();
+    });
   }
 }

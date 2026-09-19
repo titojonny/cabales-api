@@ -5,12 +5,9 @@ FROM node:22-slim AS builder
 
 WORKDIR /app
 
-# Dependencias del sistema necesarias para módulos nativos (better-sqlite3) y OpenSSL
+# OpenSSL es requerido por Prisma
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
-    python3 \
-    make \
-    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar manifiestos e instalar dependencias
@@ -45,7 +42,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Variables de entorno
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV DATABASE_URL="file:/app/data/dev.db"
 
 # Copiar artefactos compilados y dependencias de producción
 COPY --from=builder /app/package.json ./package.json
@@ -54,8 +50,8 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 
-# Crear carpetas persistentes para base de datos y comprobantes
-RUN mkdir -p /app/data /app/uploads/comprobantes
+# Crear carpetas persistentes para comprobantes
+RUN mkdir -p /app/uploads/comprobantes
 
 # Exponer puerto HTTP
 EXPOSE 3000

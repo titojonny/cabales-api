@@ -110,10 +110,40 @@ export interface CrearConsumoDTO {
   participante_ids: string[];
 }
 
+export interface ActualizarConsumoDTO {
+  descripcion?: string;
+  monto_centavos: number;
+  participante_ids: string[];
+}
+
+export interface AgregarPropinaDTO {
+  porcentaje?: number;
+  participante_ids?: string[];
+}
+
+export interface ConsumoParticipanteDTO {
+  id: string;
+  participante_id: string;
+  monto_centavos: number;
+  nombre_visible: string;
+  es_fantasma: boolean;
+}
+
+export interface ConsumoDTO {
+  id: string;
+  evento_id: string;
+  descripcion: string | null;
+  monto_centavos: number;
+  creado_en: string;
+  participantes: ConsumoParticipanteDTO[];
+}
+
 export interface ConsumoRegistradoDTO {
+  id?: string;
   descripcion: string | null;
   monto_centavos: number;
   repartido: number[];
+  porcentaje?: number;
 }
 
 export interface RegistrarPagoDTO {

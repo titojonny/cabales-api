@@ -11,18 +11,7 @@ type CuerpoEvento = z.infer<typeof crearEventoSchema>;
 // Crear un evento nuevo
 export const crearEvento = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const parse = crearEventoSchema.safeParse(req.body);
-
-    if (!parse.success) {
-      res.status(400).json({
-        success: false,
-        message: 'Datos inválidos',
-        error: parse.error.issues.map((issue) => issue.message)
-      });
-      return;
-    }
-
-    const { nombre, creador_id, auto_incluir_creador } = parse.data;
+    const { nombre, creador_id, auto_incluir_creador } = req.body as CuerpoEvento;
 
     const creador = await prisma.usuario.findUnique({ where: { id: creador_id } });
     if (!creador) {
@@ -33,13 +22,15 @@ export const crearEvento = async (req: Request, res: Response, next: NextFunctio
       data: {
         nombre,
         creador_id,
-        participantes: auto_incluir_creador
+        ...(auto_incluir_creador
           ? {
-              create: {
-                usuario_id: creador_id
+              participantes: {
+                create: {
+                  usuario_id: creador_id
+                }
               }
             }
-          : undefined
+          : {})
       }
     });
 

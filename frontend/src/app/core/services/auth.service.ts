@@ -18,17 +18,15 @@ export class AuthService {
     try {
       const stored = localStorage.getItem(STORAGE_KEY_USER);
       if (stored) {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.id && parsed.id !== 'default-user-id') {
+          return parsed;
+        }
       }
     } catch {
       // Ignorar errores de localStorage
     }
-    // Usuario por defecto si no hay nada guardado
-    return {
-      id: 'default-user-id',
-      nombre: 'Jonathan',
-      email: 'jonathan@ufg.edu.sv'
-    };
+    return null;
   }
 
   setCurrentUser(user: UsuarioDTO): void {

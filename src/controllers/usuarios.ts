@@ -11,18 +11,7 @@ type CuerpoUsuario = z.infer<typeof crearUsuarioSchema>;
 // Crear un usuario nuevo
 export const crearUsuario = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const parse = crearUsuarioSchema.safeParse(req.body);
-
-    if (!parse.success) {
-      res.status(400).json({
-        success: false,
-        message: 'Datos inválidos',
-        error: parse.error.issues.map((issue) => issue.message)
-      });
-      return;
-    }
-
-    const { nombre, email } = parse.data;
+    const { nombre, email } = req.body as CuerpoUsuario;
 
     const nuevoUsuario = await prisma.usuario.create({
       data: { nombre, email }
@@ -34,6 +23,18 @@ export const crearUsuario = async (req: Request, res: Response, next: NextFuncti
       res.status(409).json({ success: false, message: 'Ya existe un usuario con ese email' });
       return;
     }
+    next(error);
+  }
+};
+
+// Listar todos los usuarios
+export const listarUsuarios = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const usuarios = await prisma.usuario.findMany({
+      orderBy: { fecha_registro: 'asc' }
+    });
+    res.json({ success: true, data: usuarios });
+  } catch (error) {
     next(error);
   }
 };

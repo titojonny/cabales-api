@@ -28,10 +28,14 @@ app.use(
   '/api',
   rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: process.env.NODE_ENV === 'test' ? 100000 : 2000,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { success: false, message: 'Demasiadas peticiones, intenta más tarde' }
+    skip: (req) => req.path === '/health' || req.path === '/test-db',
+    message: {
+      success: false,
+      message: 'Demasiadas peticiones desde este dispositivo, por favor intenta en unos minutos.'
+    }
   })
 );
 

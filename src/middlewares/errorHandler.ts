@@ -42,7 +42,7 @@ export function errorHandler(error: unknown, req: Request, res: Response, next: 
   }
 
   if (error && typeof error === 'object' && 'name' in error && error.name === 'MulterError') {
-    const multerError = error as { code: string; message: string };
+    const multerError = error as unknown as { code: string; message: string };
     const mensaje =
       multerError.code === 'LIMIT_FILE_SIZE'
         ? 'El archivo supera el tamaño máximo permitido (10MB)'

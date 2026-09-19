@@ -40,14 +40,25 @@ import {
   sparklesOutline,
   swapHorizontalOutline,
   checkmarkDoneOutline,
-  addOutline
+  addOutline,
+  createOutline,
+  trashOutline,
+  pricetagOutline,
+  qrCodeOutline,
+  shareSocialOutline,
+  copyOutline,
+  logoWhatsapp,
+  linkOutline,
+  arrowBackOutline
 } from 'ionicons/icons';
+import QRCode from 'qrcode';
 import { CabalesApiService } from '../../core/services/cabales-api.service';
 import { AuthService } from '../../core/services/auth.service';
-import { EventoDetalleDTO, ParticipanteDetalleDTO, CerrarMesaBodyDTO } from '../../core/models/cabales.models';
+import { EventoDetalleDTO, ParticipanteDetalleDTO, CerrarMesaBodyDTO, ConsumoDTO } from '../../core/models/cabales.models';
 import { CentavosADineroPipe } from '../../shared/pipes/centavos-a-dinero.pipe';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
 import { MoneyInputComponent } from '../../shared/components/money-input/money-input.component';
+import { compartirTexto, copiarTextoAlPortapapeles, generarMensajeInvitacionMesa } from '../../core/utils/whatsapp-share';
 
 @Component({
   selector: 'app-event-detail',
@@ -57,7 +68,6 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     FormsModule,
     IonHeader,
     IonToolbar,
-    IonTitle,
     IonButtons,
     IonBackButton,
     IonContent,
@@ -77,15 +87,19 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
   template: `
     <ion-header class="ion-no-border">
       <ion-toolbar class="cabales-toolbar">
-        <ion-buttons slot="start">
-          <ion-back-button defaultHref="/events" text="" color="light"></ion-back-button>
-        </ion-buttons>
-        <ion-title class="header-title">{{ evento()?.nombre || 'Detalle de Mesa' }}</ion-title>
-        <ion-buttons slot="end">
-          @if (evento()?.estado) {
-            <app-status-badge [status]="evento()!.estado"></app-status-badge>
-          }
-        </ion-buttons>
+        <div class="custom-nav-bar">
+          <ion-buttons slot="start" class="nav-start">
+            <ion-back-button defaultHref="/events" text="" color="light"></ion-back-button>
+          </ion-buttons>
+          <div class="nav-center-title" [title]="evento()?.nombre || 'Detalle de Mesa'">
+            <span class="nav-title-text">{{ evento()?.nombre || 'Detalle de Mesa' }}</span>
+          </div>
+          <div class="nav-end">
+            @if (evento()?.estado) {
+              <app-status-badge [status]="evento()!.estado"></app-status-badge>
+            }
+          </div>
+        </div>
       </ion-toolbar>
     </ion-header>
 
@@ -103,10 +117,16 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
               <span class="hero-label">Radiografía de Mesa</span>
               <span class="hero-organizer">Por {{ ev.creador.nombre }} • {{ ev.fecha | date:'d MMM y' }}</span>
             </div>
-            <span class="hero-comensales-pill">
-              <ion-icon name="people-outline"></ion-icon>
-              {{ ev.numero_comensales }} comensales
-            </span>
+            <div class="hero-top-actions">
+              <button type="button" class="hero-invite-pill" (click)="openInviteModal()">
+                <ion-icon name="qr-code-outline"></ion-icon>
+                <span>Invitar QR</span>
+              </button>
+              <span class="hero-comensales-pill">
+                <ion-icon name="people-outline"></ion-icon>
+                {{ ev.numero_comensales }}
+              </span>
+            </div>
           </div>
 
           <!-- Tablero de 3 Cifras Financieras -->
@@ -166,6 +186,19 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
           }
         </div>
 
+        <!-- TABS DE NAVEGACIÓN: COMENSALES VS CUENTA DETALLADA -->
+        <div class="tabs-segment-container">
+          <ion-segment [value]="activeTab()" (ionChange)="activeTab.set($any($event.detail.value))" mode="ios">
+            <ion-segment-button value="COMENSALES">
+              <ion-label>👥 Comensales ({{ ev.participantes.length }})</ion-label>
+            </ion-segment-button>
+            <ion-segment-button value="CUENTA">
+              <ion-label>🧾 Cuenta Detallada ({{ consumos().length }})</ion-label>
+            </ion-segment-button>
+          </ion-segment>
+        </div>
+
+        @if (activeTab() === 'COMENSALES') {
         <!-- SECCIÓN DE COMENSALES Y BALANCES EN VIVO -->
         <div class="section-container">
           <div class="section-header">
@@ -234,30 +267,30 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
                     <div class="p-net-balance">
                       @if (ev.estado === 'CERRADO') {
                         @if (p.esta_saldado) {
-                          <span class="balance-pill credit">✓ Saldado</span>
+                          <span class="balance-pill credit"><span class="credit-dot"></span>Saldado</span>
                         } @else if ((p.deuda_pendiente_centavos ?? 0) > 0) {
                           <span class="balance-pill debt">
-                            🔴 Debe {{ p.deuda_pendiente_centavos | centavosADinero }}
+                            <span class="debt-dot"></span>Debe {{ p.deuda_pendiente_centavos | centavosADinero }}
                           </span>
                         } @else if ((p.por_cobrar_pendiente_centavos ?? 0) > 0) {
                           <span class="balance-pill credit">
-                            🟢 +{{ p.por_cobrar_pendiente_centavos | centavosADinero }} a favor
+                            <span class="credit-dot"></span>+{{ p.por_cobrar_pendiente_centavos | centavosADinero }} a favor
                           </span>
                         } @else {
-                          <span class="balance-pill credit">✓ Cabal</span>
+                          <span class="balance-pill credit"><span class="credit-dot"></span>Cabal</span>
                         }
                       } @else {
                         @if (p.monto_consumido_centavos > p.monto_pagado_centavos) {
                           <span class="balance-pill debt">
-                            🔴 Debe {{ (p.monto_consumido_centavos - p.monto_pagado_centavos) | centavosADinero }}
+                            <span class="debt-dot"></span>Debe {{ (p.monto_consumido_centavos - p.monto_pagado_centavos) | centavosADinero }}
                           </span>
                         } @else if (p.monto_pagado_centavos > p.monto_consumido_centavos) {
                           <span class="balance-pill credit">
-                            🟢 +{{ (p.monto_pagado_centavos - p.monto_consumido_centavos) | centavosADinero }} a favor
+                            <span class="credit-dot"></span>+{{ (p.monto_pagado_centavos - p.monto_consumido_centavos) | centavosADinero }} a favor
                           </span>
                         } @else {
                           <span class="balance-pill neutral">
-                            ⚪ Cabal ($0.00)
+                            Cabal ($0.00)
                           </span>
                         }
                       }
@@ -282,6 +315,108 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
             </div>
           }
         </div>
+        } @else {
+        <!-- SECCIÓN DE CUENTA DETALLADA (PLATOS Y BEBIDAS) -->
+        <div class="section-container">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Platos & Bebidas</h2>
+              <p class="section-subtitle">Detalle exacto de lo consumido en la mesa</p>
+            </div>
+            @if (ev.estado === 'ACTIVO') {
+              <div class="header-action-group">
+                <button
+                  type="button"
+                  class="tip-btn"
+                  (click)="quickAddTip(10)"
+                  [disabled]="isAddingTip() || ev.total_gastado_centavos === 0"
+                >
+                  <ion-icon name="sparkles-outline"></ion-icon>
+                  <span>@if (isAddingTip()) { Calculando... } @else { +10% Propina }</span>
+                </button>
+                <button type="button" class="small-add-btn" (click)="openCreateConsumptionModal()">
+                  <ion-icon name="restaurant-outline"></ion-icon>
+                  <span>+ Plato</span>
+                </button>
+              </div>
+            }
+          </div>
+
+          @if (isLoadingConsumos()) {
+            <div class="loading-box">
+              <ion-spinner name="crescent" color="primary"></ion-spinner>
+              <p>Cargando detalle de consumos...</p>
+            </div>
+          } @else if (consumos().length === 0) {
+            <div class="empty-table-box">
+              <div class="empty-icon">🍽️</div>
+              <p>Aún no has anotado ningún plato o consumo en esta mesa.</p>
+              @if (ev.estado === 'ACTIVO') {
+                <ion-button color="primary" fill="outline" shape="round" (click)="openCreateConsumptionModal()">
+                  + Registrar Primer Consumo
+                </ion-button>
+              }
+            </div>
+          } @else {
+            <div class="consumos-grid">
+              @for (c of consumos(); track c.id) {
+                <div class="consumo-item-card">
+                  <div class="consumo-top-row">
+                    <div class="consumo-info-group">
+                      <div
+                        class="consumo-icon-box"
+                        [class.is-tip]="c.descripcion?.toLowerCase()?.includes('propina')"
+                      >
+                        <ion-icon [name]="c.descripcion?.toLowerCase()?.includes('propina') ? 'sparkles-outline' : 'restaurant-outline'"></ion-icon>
+                      </div>
+                      <div class="consumo-text">
+                        <h4 class="consumo-title">{{ c.descripcion || 'Consumo sin descripción' }}</h4>
+                        <span class="consumo-date">{{ c.creado_en | date:'shortTime' }} • {{ c.creado_en | date:'d MMM' }}</span>
+                      </div>
+                    </div>
+                    <div class="consumo-amount-tag tabular-nums">
+                      {{ c.monto_centavos | centavosADinero }}
+                    </div>
+                  </div>
+
+                  <!-- Desglose de participantes -->
+                  <div class="consumo-split-info">
+                    <span class="split-label">
+                      @if (c.participantes.length === 1) {
+                        Consumido individualmente por:
+                      } @else {
+                        Dividido entre {{ c.participantes.length }} comensales:
+                      }
+                    </span>
+                    <div class="split-chips-list">
+                      @for (cp of c.participantes; track cp.id) {
+                        <span class="split-user-chip">
+                          {{ cp.es_fantasma ? '👻' : '👤' }} {{ cp.nombre_visible }}
+                          <strong class="chip-cost">({{ cp.monto_centavos | centavosADinero }})</strong>
+                        </span>
+                      }
+                    </div>
+                  </div>
+
+                  <!-- Acciones de edición / eliminación -->
+                  @if (ev.estado === 'ACTIVO') {
+                    <div class="consumo-card-actions">
+                      <button type="button" class="consumo-btn-edit" (click)="openEditConsumptionModal(c)">
+                        <ion-icon name="create-outline"></ion-icon>
+                        <span>Editar</span>
+                      </button>
+                      <button type="button" class="consumo-btn-delete" (click)="deleteConsumption(c)">
+                        <ion-icon name="trash-outline"></ion-icon>
+                        <span>Eliminar</span>
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </div>
+        }
 
         <!-- BARRA FLOTANTE DE ACCIONES INFERIOR (DOCK) -->
         @if (ev.estado === 'ACTIVO') {
@@ -302,6 +437,16 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
             </div>
           </div>
         }
+      } @else {
+        <div class="error-state-card">
+          <div class="error-icon-box">⚠️</div>
+          <h3 class="error-title">No pudimos encontrar la mesa</h3>
+          <p class="error-desc">Es posible que la mesa ya no exista o haya un error de conexión.</p>
+          <button type="button" class="btn-return-home" (click)="goToDashboard()">
+            <ion-icon name="arrow-back-outline"></ion-icon>
+            <span>Volver a Mis Salidas</span>
+          </button>
+        </div>
       }
 
       <!-- MODAL: ASISTENTE DE CIERRE INTELIGENTE (SIN CIERRES EN FALSO) -->
@@ -489,12 +634,12 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
         </ng-template>
       </ion-modal>
 
-      <!-- MODAL: REGISTRAR CONSUMO -->
+      <!-- MODAL: REGISTRAR / EDITAR CONSUMO -->
       <ion-modal [isOpen]="isConsumptionModalOpen()" (didDismiss)="closeConsumptionModal()">
         <ng-template>
           <div class="modal-wrapper">
             <div class="modal-header">
-              <h2>Registrar Consumo</h2>
+              <h2>{{ isEditConsumptionMode() ? 'Editar Consumo' : 'Registrar Consumo' }}</h2>
               <button class="close-btn" (click)="closeConsumptionModal()">✕</button>
             </div>
             <div class="modal-body">
@@ -558,7 +703,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
                   @if (isSavingConsumption()) {
                     <ion-spinner name="dots"></ion-spinner>
                   } @else {
-                    Guardar Consumo en Centavos
+                    {{ isEditConsumptionMode() ? 'Guardar Cambios' : 'Registrar Consumo' }}
                   }
                 </ion-button>
               </div>
@@ -625,75 +770,187 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
           </div>
         </ng-template>
       </ion-modal>
+
+      <!-- MODAL DE INVITACIÓN Y CÓDIGO QR -->
+      <ion-modal [isOpen]="isInviteModalOpen()" (didDismiss)="closeInviteModal()" class="cabales-modal invite-modal">
+        <ng-template>
+          <div class="modal-wrapper">
+            <div class="modal-header">
+              <div class="assistant-header-text">
+                <h2>Invitar a la Mesa</h2>
+                <span class="assistant-sub">Escanea o comparte para unirse a la cuenta</span>
+              </div>
+              <button type="button" class="close-btn" (click)="closeInviteModal()">✕</button>
+            </div>
+
+            <div class="modal-body-content">
+              <!-- QR Card -->
+              <div class="qr-card">
+                @if (qrCodeDataUrl()) {
+                  <div class="qr-img-box">
+                    <img [src]="qrCodeDataUrl()" alt="Código QR de la mesa" class="qr-preview-img" />
+                  </div>
+                } @else {
+                  <div class="qr-loading-box">
+                    <ion-spinner name="crescent" color="primary"></ion-spinner>
+                    <p>Generando código QR...</p>
+                  </div>
+                }
+                <div class="qr-card-info">
+                  <h4 class="qr-event-title">{{ evento()?.nombre }}</h4>
+                  <p class="qr-instructions">
+                    Apunta con la cámara de tu celular para ver la cuenta en tiempo real y agregar tus consumos.
+                  </p>
+                </div>
+              </div>
+
+              <!-- Enlace Copiable -->
+              <div class="invite-link-group">
+                <span class="invite-link-label">Enlace de la mesa:</span>
+                <div class="invite-link-bar">
+                  <span class="invite-link-text">{{ currentTableUrl() }}</span>
+                  <button type="button" class="copy-action-btn" (click)="copyTableLink()">
+                    <ion-icon name="copy-outline"></ion-icon>
+                    <span>Copiar</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Acciones de Compartir -->
+              <div class="invite-share-actions">
+                <button type="button" class="btn-whatsapp-share" (click)="shareInviteWhatsApp()">
+                  <ion-icon name="logo-whatsapp"></ion-icon>
+                  <span>Invitar por WhatsApp</span>
+                </button>
+                <button type="button" class="btn-system-share" (click)="shareInviteSystem()">
+                  <ion-icon name="share-social-outline"></ion-icon>
+                  <span>Más opciones</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </ng-template>
+      </ion-modal>
     </ion-content>
   `,
   styles: [`
     .cabales-toolbar {
-      --background: #080C14;
-      padding: 4px 12px;
+      --background: var(--ion-toolbar-background);
+      --padding-start: 4px;
+      --padding-end: 8px;
+      --min-height: 56px;
     }
 
-    .header-title {
+    .custom-nav-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      gap: 8px;
+    }
+
+    .nav-start {
+      flex-shrink: 0;
+    }
+
+    .nav-center-title {
+      flex: 1 1 auto;
+      min-width: 0;
+      text-align: center;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .nav-title-text {
       font-family: 'Outfit', sans-serif;
-      font-size: 1.15rem;
+      font-size: 1.05rem;
       font-weight: 700;
-      color: #F8FAFC;
+      color: #F1F1F1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: block;
+      max-width: 100%;
+    }
+
+    .nav-end {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
     }
 
     .event-content {
-      --background: #080C14;
+      --background: var(--ion-background-color);
       padding-bottom: 120px;
     }
 
     .loading-box {
       text-align: center;
       padding: 60px 20px;
-      color: #94A3B8;
+      color: #BEBEBE;
     }
 
     /* HERO CARD DE CONCILIACIÓN FINANCIERA */
     .hero-recon-card {
-      background: linear-gradient(145deg, rgba(16, 185, 129, 0.12) 0%, rgba(99, 102, 241, 0.14) 50%, rgba(14, 22, 38, 0.95) 100%);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(33, 38, 32, 0.85);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 24px;
-      padding: 22px 18px;
+      padding: 20px 16px;
       margin: 12px 16px 20px;
-      box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.7);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     }
 
     .hero-top-row {
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
       margin-bottom: 16px;
     }
 
     .hero-event-info {
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 2px;
+      flex: 1 1 140px;
+      min-width: 0;
     }
 
     .hero-label {
-      font-size: 0.76rem;
-      color: #94A3B8;
+      font-size: 0.72rem;
+      color: #BEBEBE;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
 
     .hero-organizer {
-      font-size: 0.8rem;
-      color: #CBD5E1;
+      font-size: 0.78rem;
+      color: #BEBEBE;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
+    }
+
+    .hero-top-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
     }
 
     .hero-comensales-pill {
-      background: rgba(255, 255, 255, 0.08);
-      color: #E2E8F0;
+      background: rgba(0, 0, 0, 0.25);
+      color: #F1F1F1;
       font-size: 0.75rem;
       font-weight: 600;
       padding: 4px 10px;
       border-radius: 9999px;
+      border: 1px solid rgba(113, 119, 109, 0.35);
       display: inline-flex;
       align-items: center;
       gap: 5px;
@@ -703,8 +960,8 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       display: grid;
       grid-template-columns: 1fr 1fr 1.2fr;
       gap: 10px;
-      background: rgba(8, 12, 20, 0.55);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.3);
       border-radius: 16px;
       padding: 12px;
       margin-bottom: 16px;
@@ -718,7 +975,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     .metric-caption {
       font-size: 0.68rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.04em;
@@ -728,18 +985,18 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     .metric-value {
       font-size: 1.15rem;
       font-weight: 800;
-      color: #FFFFFF;
+      color: #F1F1F1;
       line-height: 1.2;
 
       &.text-emerald {
-        color: #34D399;
+        color: #79ED91;
       }
     }
 
     .status-pill-covered {
-      background: rgba(16, 185, 129, 0.15);
-      color: #34D399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      background: rgba(121, 237, 145, 0.16);
+      color: #79ED91;
+      border: 1px solid rgba(121, 237, 145, 0.4);
       padding: 3px 8px;
       border-radius: 9999px;
       font-size: 0.72rem;
@@ -750,9 +1007,9 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     }
 
     .status-pill-pending {
-      background: rgba(244, 63, 94, 0.15);
-      color: #FB7185;
-      border: 1px solid rgba(244, 63, 94, 0.3);
+      background: rgba(239, 68, 68, 0.16);
+      color: #FCA5A5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
       padding: 3px 8px;
       border-radius: 9999px;
       font-size: 0.72rem;
@@ -763,7 +1020,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     }
 
     .status-pill-neutral {
-      color: #94A3B8;
+      color: #BEBEBE;
       font-size: 0.72rem;
       font-weight: 600;
     }
@@ -774,7 +1031,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     .recon-bar-track {
       height: 8px;
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(0, 0, 0, 0.3);
       border-radius: 9999px;
       overflow: hidden;
       margin-bottom: 6px;
@@ -782,13 +1039,13 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     .recon-bar-fill {
       height: 100%;
-      background: linear-gradient(90deg, #6366F1 0%, #10B981 100%);
+      background: #4DBE55;
       border-radius: 9999px;
       transition: width 0.4s ease;
 
       &.bar-full {
-        background: #10B981;
-        box-shadow: 0 0 12px rgba(16, 185, 129, 0.5);
+        background: #79ED91;
+        box-shadow: 0 0 10px rgba(121, 237, 145, 0.5);
       }
     }
 
@@ -796,14 +1053,14 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       display: flex;
       justify-content: space-between;
       font-size: 0.72rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       font-weight: 500;
     }
 
     .settlement-cta-banner {
       margin-top: 16px;
       padding-top: 14px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      border-top: 1px solid rgba(113, 119, 109, 0.3);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -813,14 +1070,14 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       display: flex;
       align-items: center;
       gap: 6px;
-      color: #34D399;
+      color: #79ED91;
       font-size: 0.82rem;
       font-weight: 600;
     }
 
     .cta-btn {
-      background: var(--ion-color-primary);
-      color: #064E3B;
+      background: #4DBE55;
+      color: #141F14;
       border: none;
       padding: 8px 14px;
       border-radius: 9999px;
@@ -830,6 +1087,214 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       align-items: center;
       gap: 6px;
       cursor: pointer;
+    }
+
+    /* TABS DE NAVEGACIÓN: COMENSALES VS CUENTA */
+    .tabs-segment-container {
+      margin: 0 16px 18px;
+
+      ion-segment {
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(113, 119, 109, 0.35);
+        border-radius: 14px;
+        padding: 4px;
+
+        ion-segment-button {
+          --color: #BEBEBE;
+          --color-checked: #F1F1F1;
+          --indicator-color: #4DBE55;
+          --indicator-box-shadow: 0 4px 12px rgba(77, 190, 85, 0.35);
+          font-weight: 700;
+          font-size: 0.82rem;
+          min-height: 38px;
+        }
+      }
+    }
+
+    .header-action-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tip-btn {
+      background: rgba(121, 237, 145, 0.15);
+      border: 1px solid rgba(121, 237, 145, 0.35);
+      color: #79ED91;
+      border-radius: 9999px;
+      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+
+      &:hover:not(:disabled) {
+        background: rgba(121, 237, 145, 0.25);
+      }
+
+      &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+    }
+
+    /* CONSUMOS DETALLADOS */
+    .consumos-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .consumo-item-card {
+      background: rgba(33, 38, 32, 0.85);
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      border-radius: 18px;
+      padding: 16px;
+      transition: all 0.2s ease;
+
+      &:hover {
+        border-color: rgba(77, 190, 85, 0.45);
+      }
+    }
+
+    .consumo-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .consumo-info-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .consumo-icon-box {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      background: rgba(77, 190, 85, 0.15);
+      color: #79ED91;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+
+      &.is-tip {
+        background: rgba(245, 158, 11, 0.15);
+        color: #FBBF24;
+      }
+    }
+
+    .consumo-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .consumo-title {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #F1F1F1;
+    }
+
+    .consumo-date {
+      font-size: 0.72rem;
+      color: #BEBEBE;
+    }
+
+    .consumo-amount-tag {
+      font-size: 1.2rem;
+      font-weight: 800;
+      color: #F1F1F1;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(113, 119, 109, 0.3);
+      padding: 4px 10px;
+      border-radius: 10px;
+    }
+
+    .consumo-split-info {
+      padding: 10px 12px;
+      background: rgba(0, 0, 0, 0.22);
+      border-radius: 12px;
+      margin-bottom: 10px;
+    }
+
+    .split-label {
+      display: block;
+      font-size: 0.72rem;
+      color: #BEBEBE;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-bottom: 6px;
+    }
+
+    .split-chips-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .split-user-chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 9999px;
+      padding: 3px 10px;
+      font-size: 0.76rem;
+      color: #F1F1F1;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+
+      .chip-cost {
+        color: #79ED91;
+        font-weight: 700;
+      }
+    }
+
+    .consumo-card-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      border-top: 1px solid rgba(113, 119, 109, 0.2);
+      padding-top: 10px;
+      margin-top: 8px;
+    }
+
+    .consumo-btn-edit, .consumo-btn-delete {
+      background: none;
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      border-radius: 8px;
+      padding: 5px 10px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .consumo-btn-edit {
+      color: #79ED91;
+      &:hover {
+        background: rgba(121, 237, 145, 0.15);
+        border-color: #79ED91;
+      }
+    }
+
+    .consumo-btn-delete {
+      color: #FCA5A5;
+      &:hover {
+        background: rgba(239, 68, 68, 0.15);
+        border-color: #EF4444;
+      }
     }
 
     /* SECCIÓN DE COMENSALES */
@@ -848,20 +1313,20 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       font-family: 'Outfit', sans-serif;
       font-size: 1.2rem;
       font-weight: 700;
-      color: #F8FAFC;
+      color: #F1F1F1;
       margin: 0;
     }
 
     .section-subtitle {
       font-size: 0.78rem;
-      color: #64748B;
+      color: #BEBEBE;
       margin: 2px 0 0;
     }
 
     .small-add-btn {
-      background: rgba(99, 102, 241, 0.15);
-      border: 1px solid rgba(99, 102, 241, 0.3);
-      color: #818CF8;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      color: #79ED91;
       font-size: 0.76rem;
       font-weight: 700;
       padding: 6px 12px;
@@ -875,10 +1340,10 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     .empty-table-box {
       text-align: center;
       padding: 40px 20px;
-      background: #0E1626;
+      background: rgba(0, 0, 0, 0.25);
       border-radius: 20px;
-      border: 1px dashed rgba(255, 255, 255, 0.1);
-      color: #94A3B8;
+      border: 1px dashed rgba(113, 119, 109, 0.35);
+      color: #BEBEBE;
       font-size: 0.9rem;
     }
 
@@ -889,19 +1354,19 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     }
 
     .participant-balance-card {
-      background: #0E1626;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(33, 38, 32, 0.75);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 18px;
       padding: 14px 16px;
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
       transition: transform 0.15s ease, border-color 0.2s ease;
 
       &.is-debtor {
-        border-color: rgba(244, 63, 94, 0.22);
+        border-color: rgba(239, 68, 68, 0.45);
       }
 
       &.is-creditor {
-        border-color: rgba(16, 185, 129, 0.22);
+        border-color: rgba(121, 237, 145, 0.4);
       }
     }
 
@@ -930,22 +1395,40 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       flex-shrink: 0;
 
       &.avatar-debt {
-        background: rgba(244, 63, 94, 0.15);
-        color: #FB7185;
-        border: 2px solid rgba(244, 63, 94, 0.3);
+        background: rgba(239, 68, 68, 0.16);
+        color: #FCA5A5;
+        border: 2px solid #EF4444;
       }
 
       &.avatar-credit {
-        background: rgba(16, 185, 129, 0.15);
-        color: #34D399;
-        border: 2px solid rgba(16, 185, 129, 0.3);
+        background: rgba(121, 237, 145, 0.16);
+        color: #79ED91;
+        border: 2px solid #4DBE55;
       }
 
       &.avatar-neutral {
-        background: rgba(148, 163, 184, 0.15);
-        color: #94A3B8;
-        border: 2px solid rgba(148, 163, 184, 0.3);
+        background: rgba(0, 0, 0, 0.25);
+        color: #BEBEBE;
+        border: 2px solid rgba(113, 119, 109, 0.35);
       }
+    }
+
+    .debt-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #EF4444;
+      box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+      display: inline-block;
+    }
+
+    .credit-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #4DBE55;
+      box-shadow: 0 0 6px rgba(77, 190, 85, 0.5);
+      display: inline-block;
     }
 
     .p-text-group {
@@ -962,16 +1445,16 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     .p-name {
       font-weight: 700;
-      color: #F8FAFC;
+      color: #F1F1F1;
       font-size: 0.96rem;
     }
 
     .organizer-badge {
       font-size: 0.65rem;
       font-weight: 700;
-      color: #818CF8;
-      background: rgba(99, 102, 241, 0.15);
-      border: 1px solid rgba(99, 102, 241, 0.25);
+      color: #79ED91;
+      background: rgba(77, 190, 85, 0.16);
+      border: 1px solid rgba(77, 190, 85, 0.35);
       padding: 1px 6px;
       border-radius: 9999px;
     }
@@ -979,25 +1462,25 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     .ghost-badge {
       font-size: 0.65rem;
       font-weight: 600;
-      color: #94A3B8;
-      background: rgba(255, 255, 255, 0.06);
+      color: #BEBEBE;
+      background: rgba(0, 0, 0, 0.25);
       padding: 1px 6px;
       border-radius: 9999px;
     }
 
     .p-breakdown {
       font-size: 0.74rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       display: flex;
       align-items: center;
       gap: 5px;
 
       strong {
-        color: #E2E8F0;
+        color: #F1F1F1;
       }
 
       .bullet {
-        color: #475569;
+        color: #71776D;
       }
     }
 
@@ -1010,13 +1493,13 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       gap: 8px;
       margin-top: 10px;
       padding-top: 10px;
-      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      border-top: 1px solid rgba(113, 119, 109, 0.25);
     }
 
     .quick-action-btn {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      color: #CBD5E1;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      color: #BEBEBE;
       padding: 4px 10px;
       border-radius: 8px;
       font-size: 0.72rem;
@@ -1028,8 +1511,8 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       transition: background 0.15s ease;
 
       &:hover {
-        background: rgba(255, 255, 255, 0.08);
-        color: #FFFFFF;
+        background: rgba(113, 119, 109, 0.3);
+        color: #F1F1F1;
       }
     }
 
@@ -1047,15 +1530,15 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     .dock-pill {
       pointer-events: auto;
-      background: rgba(14, 22, 38, 0.92);
+      background: rgba(23, 27, 22, 0.94);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(113, 119, 109, 0.4);
       border-radius: 9999px;
       padding: 6px;
       display: flex;
       gap: 8px;
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7), 0 0 20px rgba(16, 185, 129, 0.12);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
     }
 
     .dock-action-btn {
@@ -1075,37 +1558,40 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       }
 
       &.btn-consume {
-        background: rgba(255, 255, 255, 0.07);
-        color: #F8FAFC;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(113, 119, 109, 0.35);
+        color: #F1F1F1;
 
         &:hover {
-          background: rgba(255, 255, 255, 0.12);
+          background: rgba(113, 119, 109, 0.3);
         }
       }
 
       &.btn-payment {
-        background: rgba(99, 102, 241, 0.2);
-        color: #A5B4FC;
-        border: 1px solid rgba(99, 102, 241, 0.35);
+        background: rgba(77, 190, 85, 0.15);
+        color: #79ED91;
+        border: 1px solid rgba(77, 190, 85, 0.35);
 
         &:hover {
-          background: rgba(99, 102, 241, 0.3);
+          background: rgba(77, 190, 85, 0.25);
+          color: #F1F1F1;
         }
       }
 
       &.btn-close {
-        background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-        color: #FFFFFF;
-        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
+        background: #4DBE55;
+        color: #141F14;
+        font-weight: 800;
+        box-shadow: 0 4px 14px rgba(77, 190, 85, 0.35);
       }
     }
 
     /* ESTILOS DE MODALES */
     .modal-wrapper {
-      background: #0E1626;
+      background: #212620;
       height: 100%;
       padding: 24px 20px;
-      color: #F8FAFC;
+      color: #F1F1F1;
       display: flex;
       flex-direction: column;
       overflow-y: auto;
@@ -1122,6 +1608,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
         font-family: 'Outfit', sans-serif;
         font-size: 1.3rem;
         font-weight: 800;
+        color: #F1F1F1;
       }
     }
 
@@ -1131,25 +1618,30 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
         font-family: 'Outfit', sans-serif;
         font-size: 1.3rem;
         font-weight: 800;
+        color: #F1F1F1;
       }
 
       .assistant-sub {
         font-size: 0.78rem;
-        color: #94A3B8;
+        color: #BEBEBE;
         display: block;
         margin-top: 3px;
       }
     }
 
     .close-btn {
-      background: rgba(255, 255, 255, 0.08);
-      border: none;
-      color: #CBD5E1;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      color: #BEBEBE;
       width: 32px;
       height: 32px;
       border-radius: 50%;
       font-size: 1rem;
       cursor: pointer;
+
+      &:hover {
+        color: #F1F1F1;
+      }
     }
 
     .modal-body {
@@ -1158,13 +1650,13 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     .modal-desc {
       font-size: 0.85rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       margin-bottom: 18px;
     }
 
     .input-hint {
       font-size: 0.8rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       margin-bottom: 14px;
     }
 
@@ -1174,8 +1666,8 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     /* ASISTENTE DE CIERRE BOXES */
     .unsettled-notice-box {
-      background: rgba(244, 63, 94, 0.1);
-      border: 1px solid rgba(244, 63, 94, 0.25);
+      background: rgba(239, 68, 68, 0.16);
+      border: 1px solid rgba(239, 68, 68, 0.4);
       border-radius: 16px;
       padding: 16px;
       display: flex;
@@ -1184,7 +1676,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     }
 
     .notice-icon-box {
-      color: #FB7185;
+      color: #EF4444;
       font-size: 1.8rem;
       line-height: 1;
     }
@@ -1194,24 +1686,24 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
         margin: 0 0 4px;
         font-size: 0.95rem;
         font-weight: 700;
-        color: #FDA4AF;
+        color: #FCA5A5;
       }
 
       p {
         margin: 0;
         font-size: 0.82rem;
-        color: #CBD5E1;
+        color: #F1F1F1;
         line-height: 1.4;
 
         strong {
-          color: #FFFFFF;
+          color: #FCA5A5;
         }
       }
     }
 
     .settled-notice-box {
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.25);
+      background: rgba(121, 237, 145, 0.16);
+      border: 1px solid rgba(121, 237, 145, 0.4);
       border-radius: 20px;
       padding: 24px 18px;
       text-align: center;
@@ -1219,7 +1711,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
       ion-icon {
         font-size: 2.5rem;
-        color: #34D399;
+        color: #79ED91;
         margin-bottom: 8px;
       }
 
@@ -1227,19 +1719,19 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
         margin: 0 0 8px;
         font-size: 1.2rem;
         font-weight: 800;
-        color: #F8FAFC;
+        color: #F1F1F1;
       }
 
       p {
         margin: 0;
         font-size: 0.85rem;
-        color: #CBD5E1;
+        color: #BEBEBE;
         line-height: 1.4;
       }
 
       .settled-helper {
         margin-top: 10px;
-        color: #94A3B8;
+        color: #BEBEBE;
         font-size: 0.78rem;
       }
     }
@@ -1252,13 +1744,13 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       display: block;
       font-size: 0.88rem;
       font-weight: 700;
-      color: #F8FAFC;
+      color: #F1F1F1;
       margin-bottom: 12px;
     }
 
     .assistant-choice-card {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 16px;
       padding: 14px;
       display: flex;
@@ -1271,14 +1763,14 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       transition: all 0.2s ease;
 
       &.is-selected {
-        background: rgba(16, 185, 129, 0.14);
-        border-color: #10B981;
-        box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+        background: rgba(77, 190, 85, 0.18);
+        border-color: #4DBE55;
       }
     }
 
     .choice-icon {
       font-size: 1.6rem;
+      color: #79ED91;
     }
 
     .choice-text {
@@ -1290,12 +1782,12 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     .choice-heading {
       font-size: 0.9rem;
       font-weight: 700;
-      color: #FFFFFF;
+      color: #F1F1F1;
     }
 
     .choice-desc {
       font-size: 0.76rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       line-height: 1.3;
     }
 
@@ -1305,7 +1797,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
 
     .other-payers-label {
       font-size: 0.78rem;
-      color: #94A3B8;
+      color: #BEBEBE;
       margin-bottom: 8px;
       display: block;
     }
@@ -1313,7 +1805,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     .cancel-link-btn {
       background: none;
       border: none;
-      color: #94A3B8;
+      color: #BEBEBE;
       font-size: 0.8rem;
       font-weight: 600;
       margin-top: 12px;
@@ -1323,7 +1815,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
       padding: 8px;
 
       &:hover {
-        color: #F8FAFC;
+        color: #F1F1F1;
       }
     }
 
@@ -1343,7 +1835,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     .selector-title {
       font-size: 0.82rem;
       font-weight: 700;
-      color: #CBD5E1;
+      color: #F1F1F1;
       display: block;
       margin-bottom: 8px;
     }
@@ -1351,7 +1843,7 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     .toggle-all-btn {
       background: none;
       border: none;
-      color: #818CF8;
+      color: #79ED91;
       font-size: 0.78rem;
       font-weight: 700;
       cursor: pointer;
@@ -1364,45 +1856,291 @@ import { MoneyInputComponent } from '../../shared/components/money-input/money-i
     }
 
     .person-toggle-chip {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(113, 119, 109, 0.35);
       border-radius: 9999px;
       padding: 6px 14px;
       display: flex;
       align-items: center;
       gap: 6px;
-      color: #CBD5E1;
+      color: #BEBEBE;
       font-size: 0.82rem;
       font-weight: 600;
       cursor: pointer;
       transition: all 0.15s ease;
 
       &.is-selected {
-        background: rgba(16, 185, 129, 0.18);
-        border-color: #10B981;
-        color: #34D399;
+        background: rgba(77, 190, 85, 0.2);
+        border-color: #4DBE55;
+        color: #F1F1F1;
         font-weight: 700;
       }
     }
 
     .split-preview-banner {
-      background: rgba(99, 102, 241, 0.12);
-      border: 1px solid rgba(99, 102, 241, 0.25);
+      background: rgba(77, 190, 85, 0.12);
+      border: 1px solid rgba(77, 190, 85, 0.3);
       border-radius: 12px;
       padding: 10px 14px;
       font-size: 0.82rem;
-      color: #C7D2FE;
+      color: #F1F1F1;
       margin-top: 14px;
       text-align: center;
 
       strong {
-        color: #FFFFFF;
+        color: #79ED91;
       }
     }
 
     .modal-actions {
       margin-top: 20px;
       padding-bottom: 24px;
+    }
+
+    .header-qr-btn {
+      --color: #79ED91;
+    }
+
+    .hero-top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .hero-invite-pill {
+      background: rgba(77, 190, 85, 0.15);
+      border: 1px solid rgba(77, 190, 85, 0.4);
+      color: #79ED91;
+      font-size: 0.76rem;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.15s ease;
+
+      &:active {
+        transform: scale(0.95);
+      }
+
+      &:hover {
+        background: rgba(77, 190, 85, 0.25);
+      }
+    }
+
+    /* ESTILOS DE QR E INVITACIÓN */
+    .qr-card {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(113, 119, 109, 0.3);
+      border-radius: 20px;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .qr-img-box {
+      background: #FFFFFF;
+      padding: 14px;
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .qr-preview-img {
+      width: 200px;
+      height: 200px;
+      display: block;
+    }
+
+    .qr-loading-box {
+      height: 200px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: #BEBEBE;
+      font-size: 0.85rem;
+    }
+
+    .qr-card-info {
+      .qr-event-title {
+        margin: 0 0 6px 0;
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: #F1F1F1;
+      }
+
+      .qr-instructions {
+        margin: 0;
+        font-size: 0.82rem;
+        color: #BEBEBE;
+        max-width: 280px;
+        line-height: 1.4;
+      }
+    }
+
+    .invite-link-group {
+      margin-bottom: 20px;
+    }
+
+    .invite-link-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #BEBEBE;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .invite-link-bar {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      border-radius: 14px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .invite-link-text {
+      font-size: 0.8rem;
+      color: #79ED91;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: monospace;
+    }
+
+    .copy-action-btn {
+      background: rgba(113, 119, 109, 0.3);
+      border: 1px solid rgba(113, 119, 109, 0.45);
+      border-radius: 8px;
+      color: #F1F1F1;
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: rgba(113, 119, 109, 0.45);
+      }
+    }
+
+    .invite-share-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .btn-whatsapp-share {
+      background: #25D366;
+      color: #141F14;
+      border: none;
+      border-radius: 14px;
+      padding: 14px;
+      font-size: 0.95rem;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.15s ease;
+
+      ion-icon {
+        font-size: 1.3rem;
+      }
+
+      &:hover {
+        filter: brightness(1.06);
+      }
+
+      &:active {
+        transform: scale(0.98);
+      }
+    }
+
+    .btn-system-share {
+      background: rgba(0, 0, 0, 0.25);
+      color: #F1F1F1;
+      border: 1px solid rgba(113, 119, 109, 0.35);
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: rgba(113, 119, 109, 0.25);
+      }
+    }
+
+    .error-state-card {
+      margin: 40px 16px;
+      padding: 32px 20px;
+      background: #1B291B;
+      border: 1px solid rgba(113, 119, 109, 0.3);
+      border-radius: 20px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+
+      .error-icon-box {
+        font-size: 2.5rem;
+      }
+
+      .error-title {
+        font-size: 1.2rem;
+        font-weight: 800;
+        color: #F1F1F1;
+        margin: 0;
+      }
+
+      .error-desc {
+        font-size: 0.9rem;
+        color: #BEBEBE;
+        margin: 0 0 12px 0;
+        max-width: 280px;
+        line-height: 1.4;
+      }
+
+      .btn-return-home {
+        background: #4DBE55;
+        color: #141F14;
+        border: none;
+        border-radius: 12px;
+        padding: 12px 20px;
+        font-size: 0.9rem;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+      }
     }
   `]
 })
@@ -1476,6 +2214,24 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
     return all.length > 0 && this.selectedParticipantIds().length === all.length;
   });
 
+  // Pestaña activa
+  activeTab = signal<'COMENSALES' | 'CUENTA'>('COMENSALES');
+
+  // Consumos detallados
+  consumos = signal<ConsumoDTO[]>([]);
+  isLoadingConsumos = signal<boolean>(false);
+  isEditConsumptionMode = signal<boolean>(false);
+  editingConsumptionId = signal<string>('');
+  isAddingTip = signal<boolean>(false);
+
+  // Invitación y QR
+  isInviteModalOpen = signal<boolean>(false);
+  qrCodeDataUrl = signal<string>('');
+  currentTableUrl = computed(() => {
+    const id = this.eventId();
+    return typeof window !== 'undefined' ? `${window.location.origin}/events/${id}` : '';
+  });
+
   constructor() {
     addIcons({
       peopleOutline,
@@ -1495,7 +2251,16 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
       sparklesOutline,
       swapHorizontalOutline,
       checkmarkDoneOutline,
-      addOutline
+      addOutline,
+      createOutline,
+      trashOutline,
+      pricetagOutline,
+      qrCodeOutline,
+      shareSocialOutline,
+      copyOutline,
+      logoWhatsapp,
+      linkOutline,
+      arrowBackOutline
     });
   }
 
@@ -1503,7 +2268,7 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
     const id = this.route.snapshot.paramMap.get('id');
     if (id) {
       this.eventId.set(id);
-      this.loadEvent();
+      // Solo inicializamos el ID; ionViewWillEnter ejecutará la carga real sin duplicados
     }
   }
 
@@ -1537,6 +2302,7 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
 
         this.evento.set(data);
         this.isLoading.set(false);
+        this.loadConsumos();
       },
       error: () => {
         this.isLoading.set(false);
@@ -1586,9 +2352,27 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
     });
   }
 
-  // --- CONSUMOS ---
+  // --- CONSUMOS DETALLADOS ---
 
-  openConsumptionModal(): void {
+  loadConsumos(): void {
+    const id = this.eventId();
+    if (!id) return;
+
+    this.isLoadingConsumos.set(true);
+    this.api.obtenerConsumos(id).subscribe({
+      next: (data) => {
+        this.consumos.set(data);
+        this.isLoadingConsumos.set(false);
+      },
+      error: () => {
+        this.isLoadingConsumos.set(false);
+      }
+    });
+  }
+
+  openCreateConsumptionModal(): void {
+    this.isEditConsumptionMode.set(false);
+    this.editingConsumptionId.set('');
     this.consumptionDesc.set('');
     this.consumptionCentavos.set(0);
     const allIds = (this.evento()?.participantes || []).map((p) => p.id);
@@ -1596,11 +2380,28 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
     this.isConsumptionModalOpen.set(true);
   }
 
+  openEditConsumptionModal(consumo: ConsumoDTO): void {
+    this.isEditConsumptionMode.set(true);
+    this.editingConsumptionId.set(consumo.id);
+    this.consumptionDesc.set(consumo.descripcion || '');
+    this.consumptionCentavos.set(consumo.monto_centavos);
+    this.selectedParticipantIds.set(consumo.participantes.map((p) => p.participante_id));
+    this.isConsumptionModalOpen.set(true);
+  }
+
+  openConsumptionModal(): void {
+    this.openCreateConsumptionModal();
+  }
+
   closeConsumptionModal(): void {
     this.isConsumptionModalOpen.set(false);
+    this.isEditConsumptionMode.set(false);
+    this.editingConsumptionId.set('');
   }
 
   quickConsumoFor(participanteId: string): void {
+    this.isEditConsumptionMode.set(false);
+    this.editingConsumptionId.set('');
     this.consumptionDesc.set('');
     this.consumptionCentavos.set(0);
     this.selectedParticipantIds.set([participanteId]);
@@ -1631,18 +2432,89 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
     if (monto <= 0 || ids.length === 0) return;
 
     this.isSavingConsumption.set(true);
-    this.api.registrarConsumo(this.eventId(), {
-      monto_centavos: monto,
-      participante_ids: ids,
-      descripcion: this.consumptionDesc().trim() || undefined
-    }).subscribe({
-      next: () => {
-        this.isSavingConsumption.set(false);
-        this.closeConsumptionModal();
+
+    if (this.isEditConsumptionMode()) {
+      this.api.actualizarConsumo(this.eventId(), this.editingConsumptionId(), {
+        monto_centavos: monto,
+        participante_ids: ids,
+        descripcion: this.consumptionDesc().trim() || undefined
+      }).subscribe({
+        next: async () => {
+          this.isSavingConsumption.set(false);
+          this.closeConsumptionModal();
+          this.loadEvent();
+          const toast = await this.toastCtrl.create({
+            message: 'Consumo actualizado',
+            duration: 2000,
+            color: 'primary',
+            position: 'top'
+          });
+          await toast.present();
+        },
+        error: () => {
+          this.isSavingConsumption.set(false);
+        }
+      });
+    } else {
+      this.api.registrarConsumo(this.eventId(), {
+        monto_centavos: monto,
+        participante_ids: ids,
+        descripcion: this.consumptionDesc().trim() || undefined
+      }).subscribe({
+        next: async () => {
+          this.isSavingConsumption.set(false);
+          this.closeConsumptionModal();
+          this.loadEvent();
+          const toast = await this.toastCtrl.create({
+            message: 'Consumo agregado a la mesa',
+            duration: 2000,
+            color: 'primary',
+            position: 'top'
+          });
+          await toast.present();
+        },
+        error: () => {
+          this.isSavingConsumption.set(false);
+        }
+      });
+    }
+  }
+
+  deleteConsumption(consumo: ConsumoDTO): void {
+    if (this.evento()?.estado === 'CERRADO') return;
+
+    this.api.eliminarConsumo(this.eventId(), consumo.id).subscribe({
+      next: async () => {
         this.loadEvent();
+        const toast = await this.toastCtrl.create({
+          message: 'Consumo eliminado de la mesa',
+          duration: 2000,
+          color: 'medium',
+          position: 'top'
+        });
+        await toast.present();
+      }
+    });
+  }
+
+  quickAddTip(porcentaje: number = 10): void {
+    if (this.evento()?.estado === 'CERRADO' || this.totalConsumidoCentavos() === 0) return;
+
+    this.isAddingTip.set(true);
+    this.api.agregarPropina(this.eventId(), { porcentaje }).subscribe({
+      next: async () => {
+        this.isAddingTip.set(false);
+        this.loadEvent();
+        const toast = await this.toastCtrl.create({
+          message: `Propina del ${porcentaje}% agregada a la cuenta`,
+          duration: 2500,
+          color: 'success',
+          position: 'top'
+        });
+        await toast.present();
       },
       error: () => {
-        this.isSavingConsumption.set(false);
+        this.isAddingTip.set(false);
       }
     });
   }
@@ -1752,4 +2624,66 @@ export class EventDetailPage implements OnInit, ViewWillEnter {
       }
     });
   }
+
+  // --- INVITACIÓN Y CÓDIGO QR ---
+
+  async openInviteModal(): Promise<void> {
+    this.isInviteModalOpen.set(true);
+    const url = this.currentTableUrl();
+    if (url) {
+      try {
+        const qr = await QRCode.toDataURL(url, {
+          width: 260,
+          margin: 2,
+          color: {
+            dark: '#141F14',
+            light: '#FFFFFF'
+          }
+        });
+        this.qrCodeDataUrl.set(qr);
+      } catch (err) {
+        console.error('Error generando QR:', err);
+      }
+    }
+  }
+
+  closeInviteModal(): void {
+    this.isInviteModalOpen.set(false);
+  }
+
+  async copyTableLink(): Promise<void> {
+    const url = this.currentTableUrl();
+    if (!url) return;
+    const ok = await copiarTextoAlPortapapeles(url);
+    if (ok) {
+      const toast = await this.toastCtrl.create({
+        message: '¡Enlace de la mesa copiado al portapapeles!',
+        duration: 2500,
+        color: 'success',
+        position: 'top'
+      });
+      await toast.present();
+    }
+  }
+
+  async shareInviteWhatsApp(): Promise<void> {
+    const ev = this.evento();
+    const url = this.currentTableUrl();
+    if (!ev || !url) return;
+    const mensaje = generarMensajeInvitacionMesa(ev, url);
+    await compartirTexto(`Mesa en Cabales: ${ev.nombre}`, mensaje);
+  }
+
+  async shareInviteSystem(): Promise<void> {
+    const ev = this.evento();
+    const url = this.currentTableUrl();
+    if (!ev || !url) return;
+    const mensaje = generarMensajeInvitacionMesa(ev, url);
+    await compartirTexto(`Mesa en Cabales: ${ev.nombre}`, mensaje);
+  }
+
+  goToDashboard(): void {
+    this.router.navigate(['/events']);
+  }
 }
+
