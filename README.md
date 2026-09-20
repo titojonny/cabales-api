@@ -21,12 +21,12 @@ El dominio de dinero y liquidación no importa Express ni Prisma. Los repositori
 
 - Node.js 20.19 o superior.
 - npm.
-- PostgreSQL 15 o superior. `docker-compose.yml` ofrece PostgreSQL 17 para desarrollo.
+- PostgreSQL 15 o superior. `docker-compose.yml` ofrece PostgreSQL 17 para desarrollo. `api` y `frontend` son servicios opcionales del mismo compose.
 
 ## Inicio local
 
 1. Crear la configuración local a partir de `.env.example` y cambiar cualquier credencial compartida.
-2. Iniciar PostgreSQL con `docker compose up -d postgres` o usar una instancia aislada propia.
+2. Iniciar PostgreSQL con `docker compose up -d postgres` o usar una instancia aislada propia. `docker compose up --build` levanta también API y el cliente de `frontend/`.
 3. Instalar exactamente el lockfile con `npm ci`.
 4. Aplicar el esquema sin migraciones con `npm run db:push`.
 5. Insertar catálogos públicos con `npm run db:seed`.
@@ -46,8 +46,10 @@ El dominio de dinero y liquidación no importa Express ni Prisma. Los repositori
 - `AUTH_RATE_LIMIT_MAX`: máximo más estricto para autenticación cada 15 minutos.
 - `TRUST_PROXY`: número exacto de proxies confiables delante de Express; `0` por defecto.
 - `LOG_LEVEL`: nivel de Pino; tokens, cookies, contraseñas y autorización se redactan.
+- `STORAGE_DRIVER`: `local`, `s3` o `r2`; por defecto `local`.
+- `S3_*`: credenciales opcionales de comprobantes cuando el driver no es local.
 
-La configuración se valida con Zod antes de abrir el puerto o consultar la base.
+La configuración se valida con Zod antes de abrir el puerto o consultar la base. El cliente Angular/Ionic vive en `frontend/` y se construye aparte; habla un contrato legado distinto de `/api/v1`.
 
 ## Scripts
 

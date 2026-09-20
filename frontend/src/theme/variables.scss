@@ -1,0 +1,114 @@
+/**
+ * Sistema de Diseño de Cabales — Nueva Paleta Fresca:
+ * #4DBE55 - Verde Principal (Primary brand, botones principales, barra de cubierto)
+ * #79ED91 - Verde Menta (Acentos de éxito, "Cabal / Saldado", abonos, crédito)
+ * #71776D - Gris Oliva Pizarra (Bordes de tarjetas, superficies secundarias, chips inactivos)
+ * #BEBEBE - Gris Plata / Neutro (Textos secundarios, etiquetas sutiles, íconos suaves)
+ * #F1F1F1 - Blanco Niebla (Tipografía principal, cifras destacadas, titulares)
+ * #EF4444 / #F87171 - Rojo Alerta (Cuentas pendientes, deudas, estados no saldados)
+ */
+
+:root {
+  --font-family-base: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-family-mono: 'JetBrains Mono', monospace;
+
+  /* Color Primario: Verde Esmeralda / Vibrante (#4DBE55) */
+  --ion-color-primary: #4DBE55;
+  --ion-color-primary-rgb: 77, 190, 85;
+  --ion-color-primary-contrast: #141F14;
+  --ion-color-primary-contrast-rgb: 20, 31, 20;
+  --ion-color-primary-shade: #3EA645;
+  --ion-color-primary-tint: #79ED91;
+
+  /* Color Secundario: Menta / Claro (#79ED91) */
+  --ion-color-secondary: #79ED91;
+  --ion-color-secondary-rgb: 121, 237, 145;
+  --ion-color-secondary-contrast: #141F14;
+  --ion-color-secondary-contrast-rgb: 20, 31, 20;
+  --ion-color-secondary-shade: #4DBE55;
+  --ion-color-secondary-tint: #A3F5B4;
+
+  /* Color Terciario: Gris Oliva Pizarra (#71776D) */
+  --ion-color-tertiary: #71776D;
+  --ion-color-tertiary-rgb: 113, 119, 109;
+  --ion-color-tertiary-contrast: #F1F1F1;
+  --ion-color-tertiary-contrast-rgb: 241, 241, 241;
+  --ion-color-tertiary-shade: #5A6057;
+  --ion-color-tertiary-tint: #8A9186;
+
+  /* Éxito / Saldado / Cabal: #79ED91 */
+  --ion-color-success: #79ED91;
+  --ion-color-success-rgb: 121, 237, 145;
+  --ion-color-success-contrast: #141F14;
+  --ion-color-success-contrast-rgb: 20, 31, 20;
+  --ion-color-success-shade: #4DBE55;
+  --ion-color-success-tint: #BEBEBE;
+
+  /* Advertencia / Pendiente: #F59E0B / #EF4444 */
+  --ion-color-warning: #F59E0B;
+  --ion-color-warning-rgb: 245, 158, 11;
+  --ion-color-warning-contrast: #141F14;
+  --ion-color-warning-contrast-rgb: 20, 31, 20;
+  --ion-color-warning-shade: #D97706;
+  --ion-color-warning-tint: #FBBF24;
+
+  /* Peligro / Deuda / Pendiente: #EF4444 (Rojo) */
+  --ion-color-danger: #EF4444;
+  --ion-color-danger-rgb: 239, 68, 68;
+  --ion-color-danger-contrast: #FFFFFF;
+  --ion-color-danger-contrast-rgb: 255, 255, 255;
+  --ion-color-danger-shade: #DC2626;
+  --ion-color-danger-tint: #F87171;
+
+  /* Info / En Revisión: #698696 */
+  --ion-color-info: #698696;
+  --ion-color-info-rgb: 105, 134, 150;
+  --ion-color-info-contrast: #FFFFFF;
+  --ion-color-info-contrast-rgb: 255, 255, 255;
+  --ion-color-info-shade: #4F6B7A;
+  --ion-color-info-tint: #8FAABA;
+
+  /* Base del Sistema: Deep Charcoal-Olive */
+  --ion-background-color: #171B16;
+  --ion-background-color-rgb: 23, 27, 22;
+
+  --ion-text-color: #F1F1F1;
+  --ion-text-color-rgb: 241, 241, 241;
+
+  --ion-card-background: #212620;
+  --ion-item-background: #212620;
+  --ion-toolbar-background: #171B16;
+  --ion-tab-bar-background: #171B16;
+
+  --ion-border-color: rgba(113, 119, 109, 0.35);
+
+  /* Tokens de Cabales */
+  --cabales-green-primary: #4DBE55;
+  --cabales-green-mint: #79ED91;
+  --cabales-slate: #71776D;
+  --cabales-gray: #BEBEBE;
+  --cabales-offwhite: #F1F1F1;
+  --cabales-red: #EF4444;
+  --cabales-red-soft: #F87171;
+
+  --cabales-card-border: 1px solid rgba(113, 119, 109, 0.35);
+  --cabales-card-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  --cabales-glass-bg: rgba(33, 38, 32, 0.92);
+  --cabales-glass-blur: blur(16px);
+
+  /* Tokens de Balance */
+  --cabales-debt: #EF4444;
+  --cabales-debt-text: #FCA5A5;
+  --cabales-debt-bg: rgba(239, 68, 68, 0.16);
+  --cabales-debt-border: rgba(239, 68, 68, 0.4);
+
+  --cabales-credit: #79ED91;
+  --cabales-credit-text: #79ED91;
+  --cabales-credit-bg: rgba(121, 237, 145, 0.18);
+  --cabales-credit-border: rgba(121, 237, 145, 0.4);
+
+  --cabales-neutral: #BEBEBE;
+  --cabales-neutral-text: #BEBEBE;
+  --cabales-neutral-bg: rgba(113, 119, 109, 0.25);
+  --cabales-neutral-border: rgba(113, 119, 109, 0.4);
+}

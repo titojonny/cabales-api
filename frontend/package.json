@@ -1,0 +1,50 @@
+{
+  "name": "frontend",
+  "version": "0.0.1",
+  "author": "Ionic Framework",
+  "homepage": "https://ionicframework.com/",
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build",
+    "watch": "ng build --watch --configuration development",
+    "test": "ng test",
+    "lint": "ng lint",
+    "postinstall": "node -e \"const f='node_modules/@angular/cli/src/utilities/node-version.js'; try { const fs=require('fs'); if(fs.existsSync(f)){ let c=fs.readFileSync(f,'utf8'); if(!c.includes('^24.0.0')){ fs.writeFileSync(f, c.replace('^24.15.0', '^24.0.0')); } } } catch(e){}\""
+  },
+  "private": true,
+  "dependencies": {
+    "@angular/common": "22.0.1",
+    "@angular/compiler": "22.0.1",
+    "@angular/core": "22.0.1",
+    "@angular/forms": "22.0.1",
+    "@angular/platform-browser": "22.0.1",
+    "@angular/router": "22.0.1",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/haptics": "8.0.2",
+    "@capacitor/keyboard": "8.0.5",
+    "@capacitor/status-bar": "8.0.3",
+    "@ionic/angular": "^9.0.0",
+    "ionicons": "^8.1.0",
+    "qrcode": "^1.5.4",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@angular/build": "22.0.1",
+    "@angular/cli": "22.0.1",
+    "@angular/compiler-cli": "22.0.1",
+    "@angular/language-service": "22.0.1",
+    "@capacitor/cli": "8.5.2",
+    "@ionic/angular-toolkit": "^13.0.0",
+    "@types/qrcode": "^1.5.6",
+    "angular-eslint": "22.0.0",
+    "eslint": "^9.16.0",
+    "jsdom": "^26.0.0",
+    "typescript": "~6.0.0",
+    "typescript-eslint": "^8.61.0",
+    "vitest": "^4.0.8"
+  },
+  "description": "An Ionic project"
+}

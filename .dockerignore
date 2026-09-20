@@ -1,0 +1,34 @@
+# Dependencias
+node_modules/
+npm-debug.log*
+
+# Compilados y builds
+dist/
+build/
+coverage/
+
+# Base de datos local SQLite y archivos subidos locales
+*.db
+*.db-journal
+*.sqlite
+uploads/
+data/
+
+# Tests y frontend
+tests/
+frontend/
+
+# Git y entornos
+.git/
+.gitignore
+.env
+.env.*
+.vscode/
+.idea/
+.agents/
+.claude/
+.windsurf/
+
+# Documentación interna de desarrollo
+docs/
+*.md
