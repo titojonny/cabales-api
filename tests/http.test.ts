@@ -163,4 +163,16 @@ describe('HTTP auth aislado', () => {
       .set('Cookie', ['cabales_session=session-token', 'cabales_session_csrf=csrf-token']);
     expect(me.status).toBe(200);
   });
+
+  it('permite el origen de cabales-app y no bloquea el fetch cruzado', async () => {
+    const response = await request(fixture().app)
+      .options('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:5173')
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type,x-csrf-token,x-request-id');
+    expect(response.status).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
+    expect(response.headers['cross-origin-resource-policy']).toBe('cross-origin');
+  });
 });

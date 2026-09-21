@@ -2,21 +2,10 @@
 node_modules/
 npm-debug.log*
 
-# Compilados y builds
+# Compilados
 dist/
 build/
 coverage/
-
-# Base de datos local SQLite y archivos subidos locales
-*.db
-*.db-journal
-*.sqlite
-uploads/
-data/
-
-# Tests y frontend
-tests/
-frontend/
 
 # Git y entornos
 .git/
@@ -29,6 +18,5 @@ frontend/
 .claude/
 .windsurf/
 
-# Documentación interna de desarrollo
-docs/
+# Documentación no necesaria en la imagen
 *.md

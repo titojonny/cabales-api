@@ -19,7 +19,7 @@ COPY src ./src
 RUN npm run build
 RUN npm prune --omit=dev
 
-# Etapa 2: runtime.
+# Etapa 2: runtime Express.
 FROM node:22-slim AS runner
 
 WORKDIR /app
@@ -36,8 +36,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-
-RUN mkdir -p /app/uploads/comprobantes
 
 EXPOSE 3000
 

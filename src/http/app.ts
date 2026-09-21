@@ -15,7 +15,6 @@ import type { GroupsService } from '../modules/groups/groups.service.js';
 import { createGroupsRouter } from '../modules/groups/groups.router.js';
 import type { SettlementsService } from '../modules/settlements/settlements.service.js';
 import { createSettlementsRouter } from '../modules/settlements/settlements.router.js';
-import { AppError } from '../shared/errors.js';
 import {
   errorHandler,
   notFound,
@@ -69,7 +68,12 @@ export function createApp(dependencies: AppDependencies) {
   app.disable('x-powered-by');
   app.set('trust proxy', config.TRUST_PROXY);
   app.use(requestContext);
-  app.use(helmet());
+  app.use(
+    helmet({
+      // La PWA en cabales-app corre en otro origen (:5173); same-origin bloquearía el fetch con cookies.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use('/api/v1', privateNoStore);
   app.use(['/health', '/ready'], (_req, res, next) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -79,9 +83,19 @@ export function createApp(dependencies: AppDependencies) {
   app.use(
     cors({
       credentials: true,
+      methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: [
+        'Content-Type',
+        'Accept',
+        'X-CSRF-Token',
+        'X-Request-Id',
+        'X-Request-ID',
+        'Idempotency-Key',
+      ],
+      exposedHeaders: ['X-Request-Id'],
       origin(origin, callback) {
         if (!origin || config.corsOrigins.includes(origin)) callback(null, true);
-        else callback(new AppError(403, 'CORS_ORIGIN_DENIED', 'Origen no permitido'));
+        else callback(null, false);
       },
     }),
   );

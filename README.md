@@ -15,18 +15,20 @@ La separación mínima es deliberada:
 - `prisma/schema.prisma`: modelo completo de persistencia. No hay migraciones en este repositorio.
 - `docs/openapi.yaml`: contrato HTTP de la versión 1.
 
+Este repositorio no contiene interfaz de usuario. El cliente React está en `cabales-app`.
+
 El dominio de dinero y liquidación no importa Express ni Prisma. Los repositorios no deciden RBAC ni repartos.
 
 ## Requisitos
 
 - Node.js 20.19 o superior.
 - npm.
-- PostgreSQL 15 o superior. `docker-compose.yml` ofrece PostgreSQL 17 para desarrollo. `api` y `frontend` son servicios opcionales del mismo compose.
+- PostgreSQL 15 o superior. `docker-compose.yml` ofrece PostgreSQL 17 para desarrollo. El servicio `api` es opcional.
 
 ## Inicio local
 
 1. Crear la configuración local a partir de `.env.example` y cambiar cualquier credencial compartida.
-2. Iniciar PostgreSQL con `docker compose up -d postgres` o usar una instancia aislada propia. `docker compose up --build` levanta también API y el cliente de `frontend/`.
+2. Iniciar PostgreSQL con `docker compose up -d postgres` o usar una instancia aislada propia. `docker compose up --build api` levanta Express en el puerto 3000.
 3. Instalar exactamente el lockfile con `npm ci`.
 4. Aplicar el esquema sin migraciones con `npm run db:push`.
 5. Insertar catálogos públicos con `npm run db:seed`.
@@ -39,17 +41,15 @@ El dominio de dinero y liquidación no importa Express ni Prisma. Los repositori
 - `NODE_ENV`: `development`, `test` o `production`; activa cookies `Secure` en producción.
 - `PORT`: puerto HTTP, por defecto `3000`.
 - `DATABASE_URL`: URL `postgresql://` obligatoria.
-- `CORS_ORIGINS`: allowlist exacta separada por comas; nunca se usa comodín con credenciales.
+- `CORS_ORIGINS`: allowlist exacta separada por comas (`http://localhost:5173` y `http://127.0.0.1:5173` por defecto); nunca se usa comodín con credenciales.
 - `SESSION_TTL_HOURS`: vigencia de la sesión, por defecto 168 horas.
 - `COOKIE_NAME`: nombre de la cookie HttpOnly.
 - `RATE_LIMIT_MAX`: máximo global por IP cada 15 minutos.
 - `AUTH_RATE_LIMIT_MAX`: máximo más estricto para autenticación cada 15 minutos.
 - `TRUST_PROXY`: número exacto de proxies confiables delante de Express; `0` por defecto.
 - `LOG_LEVEL`: nivel de Pino; tokens, cookies, contraseñas y autorización se redactan.
-- `STORAGE_DRIVER`: `local`, `s3` o `r2`; por defecto `local`.
-- `S3_*`: credenciales opcionales de comprobantes cuando el driver no es local.
 
-La configuración se valida con Zod antes de abrir el puerto o consultar la base. El cliente Angular/Ionic vive en `frontend/` y se construye aparte; habla un contrato legado distinto de `/api/v1`.
+La configuración se valida con Zod antes de abrir el puerto o consultar la base. El cliente oficial es el repositorio hermano `cabales-app` (React, Tailwind, TypeScript, Vite) y consume `/api/v1` con cookies y CSRF.
 
 ## Scripts
 
@@ -117,7 +117,7 @@ Prisma no genera restricciones `CHECK`. Los servicios MVP verifican positividad,
 - Token CSRF por sesión en cabecera y cookie separada, comparado en tiempo constante.
 - Las respuestas de autenticación y rutas privadas usan `Cache-Control: private, no-store`; health y readiness usan `no-store` para evitar estados obsoletos.
 - RBAC `OWNER`, `ADMIN`, `MEMBER`; el actor siempre se deriva de la sesión.
-- Helmet, CORS allowlist, JSON máximo de 32 KB, rate limit global y límite estricto solo en login/register.
+- Helmet, CORS allowlist del cliente React, JSON máximo de 32 KB, rate limit global y límite estricto solo en login/register. `Cross-Origin-Resource-Policy` es `cross-origin` para que cabales-app en Vite pueda leer respuestas con cookies.
 - Consultas parametrizadas mediante Prisma, errores centralizados y logs JSON sin secretos.
 - Gastos, cierres, pagos y cambios parentales críticos usan transacciones `Serializable` con hasta tres intentos ante `P2034`.
 - El cambio de moneda y borrado bloquean la fila del grupo; la creación de gasto toma un bloqueo compartido. Las FK hacen que creaciones concurrentes esperen o fallen de forma segura.

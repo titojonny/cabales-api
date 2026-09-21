@@ -1,5 +1,5 @@
 # PostgreSQL exclusivo para desarrollo local; no contiene credenciales de producción.
-# api y frontend son opcionales; el flujo diario usa `docker compose up -d postgres`.
+# El cliente React vive en el repositorio hermano cabales-app (Vite en :5173).
 services:
   postgres:
     image: postgres:17-alpine
@@ -8,7 +8,8 @@ services:
       POSTGRES_USER: cabales
       POSTGRES_PASSWORD: cabales_local_only
     ports:
-      - '5432:5432'
+      # 5433 en el host para no chocar con un PostgreSQL de Windows u otros proyectos en 5432.
+      - '5433:5432'
     volumes:
       - cabales-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -28,33 +29,13 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://cabales:cabales_local_only@postgres:5432/cabales?schema=public
-      CORS_ORIGINS: http://localhost:4200,http://127.0.0.1:4200,http://localhost:8100
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       COOKIE_NAME: cabales_session
       SESSION_TTL_HOURS: 168
       TRUST_PROXY: 1
-      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
-      S3_ENDPOINT: ${S3_ENDPOINT:-}
-      S3_REGION: ${S3_REGION:-auto}
-      S3_BUCKET: ${S3_BUCKET:-}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
-      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - cabales-uploads:/app/uploads
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - '4200:80'
-    depends_on:
-      - api
 
 volumes:
   cabales-postgres:
-  cabales-uploads:

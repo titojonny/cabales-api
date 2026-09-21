@@ -1,28 +1,24 @@
 .env.example: documenta cada variable, su propósito seguro y los valores exclusivamente locales.
-.dockerignore: declara exclusiones del contexto de build de la API, incluido el cliente frontend anidado.
+.dockerignore: declara exclusiones del contexto de build de la imagen Express.
 .gitignore: organiza secretos, artefactos, volúmenes, logs, IDE y archivos generados mediante secciones comentadas.
-.prettierignore: sus patrones declarativos excluyen dependencias, artefactos, cobertura, lockfile y el cliente frontend anidado.
+.prettierignore: sus patrones declarativos excluyen dependencias, artefactos, cobertura y lockfile sin requerir comentarios adicionales.
 .prettierrc.json: JSON no admite comentarios; este registro documenta que fija comillas simples, coma final y ancho 100.
 DOCUMENTACION.md: registra una línea por archivo mantenido, incluido el lockfile, y declara en README las salidas generadas no mantenidas.
 Dockerfile: documenta el build multi-etapa, Prisma generate, db push y el runtime sin migraciones versionadas.
 README.md: contiene arquitectura, instalación, scripts, seguridad, contrato, invariantes, verificación, límites y principios.
-docker-compose.yml: comenta el alcance local y declara PostgreSQL, API, frontend, persistencia y healthcheck con claves oficiales.
-docs/ANGULAR_IONIC_INTEGRATION.md: documenta el cliente Angular/Ionic anidado y su contrato legado respecto a esta API modular.
+docker-compose.yml: comenta el alcance local y declara PostgreSQL, API Express, persistencia y healthcheck con claves oficiales.
 docs/openapi.yaml: comenta su función y documenta rutas, seguridad, parámetros, cuerpos, sobres y DTO implementados.
-frontend/: cliente Angular + Ionic Standalone anidado; sus archivos se mantienen en ese árbol con su propio package y Docker.
 eslint.config.js: incluye TSDoc de la configuración exportada y reglas declarativas legibles.
 package-lock.json: archivo generado JSON sin comentarios; fija de forma reproducible el árbol resuelto por npm.
 package.json: JSON sin comentarios; nombres de scripts y metadatos describen ejecución, generación reproducible, calidad y ciclo de base de datos.
 prisma.config.ts: documenta con TSDoc la configuración Prisma 7 de schema, seed y URL externa.
 prisma/schema.prisma: usa comentarios Prisma para fuentes derivadas, seguridad, centavos e invariantes sin CHECK.
 prisma/seed.ts: documenta que el seed es idempotente y nunca crea credenciales predeterminadas.
-src/config/env.ts: documenta la carga validada y fail-fast de configuración externa.
+src/config/env.ts: documenta la carga de .env, validación fail-fast y configuración canónica.
 src/config/logger.ts: documenta la creación del logger JSON y la redacción defensiva de secretos.
-src/config/upload.ts: documenta el filtro multer de comprobantes en memoria y el límite de 10 MB.
-src/contracts/index.ts: documenta DTOs del cliente Angular legado anidado en frontend/.
 src/database/client.ts: documenta la construcción perezosa del adaptador PostgreSQL y sus tipos de infraestructura.
 src/database/transaction.ts: documenta la detección P2034 y el máximo finito de reintentos serializables.
-src/http/app.ts: documenta dependencias explícitas, composición modular y controles HTTP transversales.
+src/http/app.ts: documenta dependencias explícitas, composición modular, CORS del cliente React y CORP cruzado.
 src/http/express.d.ts: documenta el contexto de request confiable añadido por autenticación y correlación.
 src/http/middleware.ts: documenta request ID, cache privada, sesión, recuperación CSRF, 404 y errores.
 src/http/response.ts: documenta el emisor único del sobre exitoso v1.
@@ -47,19 +43,17 @@ src/modules/settlements/settlements.repository.ts: documenta reintentos, expirac
 src/modules/settlements/settlements.router.ts: documenta endpoints de cierre, consulta y confirmación de pago.
 src/modules/settlements/settlements.schema.ts: documenta el identificador del evento que se cierra una sola vez.
 src/modules/settlements/settlements.service.ts: documenta cálculo desde fuentes reales, RBAC y autorización de pagos.
-src/services/storage.ts: documenta el puerto de comprobantes en disco local, S3 y R2.
 src/shared/crypto.ts: documenta generación, hash, serialización estable y huella idempotente.
 src/shared/errors.ts: documenta errores controlados y aserciones de precondiciones.
 src/shared/idempotency.ts: documenta la decisión determinista de vigencia de una llave idempotente.
 src/shared/money.ts: documenta enteros positivos, suma segura, reparto determinista, igualdad exacta y moneda.
 src/shared/settlement.ts: documenta balances, plan de transferencia y algoritmo puro determinista.
 src/shared/validation.ts: documenta validación canónica de body, UUID y cabecera idempotente.
-tests/http.test.ts: los casos documentan health, readiness, sobre, cache, límites auth, cookies y recuperación CSRF.
+tests/http.test.ts: los casos documentan health, readiness, sobre, cache, CORS del cliente React, límites auth, cookies y recuperación CSRF.
 tests/expenses.service.test.ts: los casos documentan reproducción idempotente vigente y reclamación tras ausencia o expiración.
 tests/money.test.ts: los nombres de casos documentan reparto exacto y rechazo de entradas monetarias inválidas.
 tests/settlement.test.ts: los nombres de casos documentan consolidación, determinismo, balance y caso liquidado.
 tests/settlements.service.test.ts: los casos documentan recuperación de pago repetido y rechazo de estados terminales.
-tests/storage.test.ts: los casos documentan subida local, URLs S3/R2 y la fábrica según credenciales.
 tests/transaction.test.ts: los casos documentan reintento P2034 acotado y reutilización tras expiración.
 tests/validation.test.ts: los casos documentan DTO estrictos, URL HTTP(S) y configuración segura de proxy.
 tsconfig.build.json: JSON sin comentarios; este registro documenta compilación exclusiva de fuente hacia dist con declaraciones.

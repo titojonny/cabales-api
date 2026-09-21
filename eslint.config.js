@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 
 /** Configuración plana de ESLint para fuente y pruebas TypeScript. */
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'generated/**', 'frontend/**'] },
+  { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'generated/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

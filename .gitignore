@@ -36,6 +36,3 @@ yarn-error.log*
 Thumbs.db
 
 /generated/prisma
-
-# Archivos subidos por usuarios (comprobantes de pago)
-uploads/

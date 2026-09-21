@@ -32,7 +32,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1136.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "argon2": "^0.44.0",
@@ -42,7 +41,6 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.2",
     "helmet": "^8.3.0",
-    "multer": "^2.4.0",
     "pino": "^9.9.4",
     "zod": "^4.4.3"
   },
@@ -51,7 +49,6 @@
     "@types/cookie-parser": "^1.4.9",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
-    "@types/multer": "^2.2.0",
     "@types/node": "^26.2.0",
     "@types/supertest": "^7.2.1",
     "eslint": "^10.8.1",
