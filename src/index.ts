@@ -13,12 +13,20 @@ import { GroupsRepository } from './modules/groups/groups.repository.js';
 import { GroupsService } from './modules/groups/groups.service.js';
 import { SettlementsRepository } from './modules/settlements/settlements.repository.js';
 import { SettlementsService } from './modules/settlements/settlements.service.js';
+import { LoggingEmailProvider } from './infrastructure/email.js';
 
 const config = loadConfig();
 const logger = createLogger(config.LOG_LEVEL);
 const db = createDatabase(config.DATABASE_URL);
 const groups = new GroupsService(new GroupsRepository(db));
-const auth = new AuthService(new AuthRepository(db), config.sessionTtlMs);
+const auth = new AuthService(
+  new AuthRepository(db),
+  config.sessionTtlMs,
+  new LoggingEmailProvider(),
+  config.emailVerificationTtlMs,
+  config.passwordResetTtlMs,
+  config.APP_ORIGIN,
+);
 const events = new EventsService(new EventsRepository(db), groups);
 const expenses = new ExpensesService(new ExpensesRepository(db), groups);
 const settlements = new SettlementsService(new SettlementsRepository(db), groups);

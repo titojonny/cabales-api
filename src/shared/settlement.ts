@@ -41,7 +41,8 @@ export function calculateSettlement(
     .sort((a, b) => b.amount - a.amount || a.id.localeCompare(b.id));
 
   if (
-    sumCents(debtors.map((item) => item.amount)) !== sumCents(creditors.map((item) => item.amount))
+    sumCents(debtors.map((debtorEntry) => debtorEntry.amount)) !==
+    sumCents(creditors.map((creditorEntry) => creditorEntry.amount))
   ) {
     throw new AppError(422, 'UNBALANCED_SETTLEMENT', 'Los balances del evento no cuadran');
   }

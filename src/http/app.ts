@@ -126,6 +126,10 @@ export function createApp(dependencies: AppDependencies) {
   const authLimiter = limiter(config.AUTH_RATE_LIMIT_MAX, 'Demasiados intentos de autenticacion');
   v1.use('/auth/login', authLimiter);
   v1.use('/auth/register', authLimiter);
+  v1.use('/auth/email-verification/request', authLimiter);
+  v1.use('/auth/email-verification/resend', authLimiter);
+  v1.use('/auth/password-recovery/request', authLimiter);
+  v1.use('/auth/password-recovery/resend', authLimiter);
   v1.use('/auth', createAuthRouter(dependencies.auth, config));
 
   const authenticated = Router();

@@ -15,6 +15,17 @@ export const registerSchema = z
 /** Contrato canónico de inicio de sesión. */
 export const loginSchema = z.object({ email, password }).strict();
 
+export const emailTokenSchema = z.object({ token: z.string().min(32).max(256) }).strict();
+
+export const emailSchema = z.object({ email }).strict();
+
+export const passwordResetSchema = z
+  .object({ token: z.string().min(32).max(256), password })
+  .strict();
+
+export type EmailInput = z.infer<typeof emailSchema>;
+export type PasswordResetInput = z.infer<typeof passwordResetSchema>;
+
 /** Registro validado y normalizado. */
 export type RegisterInput = z.infer<typeof registerSchema>;
 /** Credenciales validadas y normalizadas. */

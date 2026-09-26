@@ -2,7 +2,9 @@ import argon2 from 'argon2';
 import { hashToken, randomToken } from '../../shared/crypto.js';
 import { AppError, ensure } from '../../shared/errors.js';
 import type { LoginInput, RegisterInput } from './auth.schema.js';
+import type { EmailInput, PasswordResetInput } from './auth.schema.js';
 import { AuthRepository } from './auth.repository.js';
+import type { EmailProvider } from '../../infrastructure/email.js';
 
 interface RequestAgent {
   userAgent?: string;
@@ -31,6 +33,10 @@ export interface AuthPort {
   login(input: LoginInput, agent: RequestAgent): Promise<SessionResult>;
   authenticate(sessionToken: string): Promise<AuthContext>;
   logout(sessionToken: string): Promise<void>;
+  requestEmailVerification?(email: string): Promise<void>;
+  verifyEmail?(token: string): Promise<AuthContext['user']>;
+  requestPasswordReset?(email: string): Promise<void>;
+  resetPassword?(input: PasswordResetInput): Promise<void>;
 }
 
 /** Reglas de autenticación; no conoce cookies ni Express. */
@@ -38,6 +44,10 @@ export class AuthService {
   constructor(
     private readonly repository: AuthRepository,
     private readonly sessionTtlMs: number,
+    private readonly emailProvider: EmailProvider,
+    private readonly emailVerificationTtlMs: number,
+    private readonly passwordResetTtlMs: number,
+    private readonly appOrigin: string,
   ) {}
 
   async register(input: RegisterInput, agent: RequestAgent): Promise<SessionResult> {
@@ -48,6 +58,7 @@ export class AuthService {
         displayName: input.displayName,
         passwordHash,
       });
+      await this.sendVerification(user.id, user.email);
       return this.issueSession(user, agent);
     } catch (error) {
       if (AuthRepository.isUniqueError(error)) {
@@ -55,6 +66,40 @@ export class AuthService {
       }
       throw error;
     }
+  }
+
+  async requestEmailVerification(email: string): Promise<void> {
+    const user = await this.repository.findUserByEmail(email);
+    if (user?.isActive && !user.emailVerifiedAt) await this.sendVerification(user.id, user.email);
+  }
+
+  async verifyEmail(token: string): Promise<AuthContext['user']> {
+    const user = await this.repository.claimEmailVerification(hashToken(token));
+    ensure(user, 400, 'EMAIL_TOKEN_INVALID', 'El enlace de correo no es valido o expiro');
+    return user;
+  }
+
+  async requestPasswordReset(email: string): Promise<void> {
+    const user = await this.repository.findUserByEmail(email);
+    if (!user?.isActive) return;
+    const token = randomToken();
+    await this.repository.createPasswordResetToken({
+      userId: user.id,
+      tokenHash: hashToken(token),
+      expiresAt: new Date(Date.now() + this.passwordResetTtlMs),
+    });
+    await this.emailProvider.send({
+      to: user.email,
+      subject: 'Recupera tu acceso a Cabales',
+      text: `Abre ${this.appOrigin}/reset-password#token=${token} para definir una nueva contraseña.`,
+    });
+  }
+
+  async resetPassword(input: PasswordResetInput): Promise<void> {
+    const token = await this.repository.claimPasswordReset(hashToken(input.token));
+    ensure(token, 400, 'PASSWORD_TOKEN_INVALID', 'El enlace de recuperación no es valido o expiro');
+    const passwordHash = await argon2.hash(input.password, { type: argon2.argon2id });
+    await this.repository.updatePasswordAndRevokeSessions(token.userId, passwordHash);
   }
 
   async login(input: LoginInput, agent: RequestAgent): Promise<SessionResult> {
@@ -108,5 +153,19 @@ export class AuthService {
       ...(agent.ipAddress ? { ipAddress: agent.ipAddress } : {}),
     });
     return { sessionToken, csrfToken, expiresAt, user };
+  }
+
+  private async sendVerification(userId: string, email: string): Promise<void> {
+    const token = randomToken();
+    await this.repository.createEmailVerificationToken({
+      userId,
+      tokenHash: hashToken(token),
+      expiresAt: new Date(Date.now() + this.emailVerificationTtlMs),
+    });
+    await this.emailProvider.send({
+      to: email,
+      subject: 'Verifica tu correo de Cabales',
+      text: `Abre ${this.appOrigin}/verify-email#token=${token} para verificar tu correo.`,
+    });
   }
 }

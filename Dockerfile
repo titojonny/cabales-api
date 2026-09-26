@@ -7,17 +7,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
 
 COPY prisma ./prisma
 COPY prisma.config.ts ./
-RUN npx prisma generate
+RUN pnpm exec prisma generate
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN npm run build
-RUN npm prune --omit=dev
+RUN pnpm build
+RUN pnpm prune --prod
 
 # Etapa 2: runtime Express.
 FROM node:22-slim AS runner
@@ -39,5 +39,6 @@ COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 
 EXPOSE 3000
 
-# Este repositorio sincroniza el schema con db push, no con migraciones versionadas.
-CMD ["sh", "-c", "npx prisma db push && node dist/index.js"]
+# Las migraciones deben aplicarse como paso explícito del despliegue; el proceso web
+# no modifica el esquema de producción al iniciar.
+CMD ["node", "dist/index.js"]

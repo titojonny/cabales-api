@@ -55,24 +55,24 @@ export class SettlementsService {
     for (const expense of context.expenses) {
       assertExactTotal(
         expense.totalCents,
-        expense.participants.map((item) => item.shareCents),
+        expense.participants.map((participant) => participant.shareCents),
         'SHARES_MISMATCH',
       );
       assertExactTotal(
         expense.totalCents,
-        expense.payers.map((item) => item.amountCents),
+        expense.payers.map((payer) => payer.amountCents),
         'PAYERS_MISMATCH',
       );
       balances.push(
-        ...expense.participants.map((item) => ({
-          participantId: item.eventParticipantId,
-          shareCents: item.shareCents,
+        ...expense.participants.map((participant) => ({
+          participantId: participant.eventParticipantId,
+          shareCents: participant.shareCents,
           paidCents: 0,
         })),
-        ...expense.payers.map((item) => ({
-          participantId: item.expenseParticipant.eventParticipantId,
+        ...expense.payers.map((payer) => ({
+          participantId: payer.expenseParticipant.eventParticipantId,
           shareCents: 0,
-          paidCents: item.amountCents,
+          paidCents: payer.amountCents,
         })),
       );
     }

@@ -98,18 +98,18 @@ export class ExpensesService {
     if (input.items) {
       assertExactTotal(
         input.totalCents,
-        input.items.map((item) => item.amountCents),
+        input.items.map((expenseItem) => expenseItem.amountCents),
         'ITEMS_MISMATCH',
       );
       const allocatedByParticipant = new Map<string, number>();
-      for (const item of input.items) {
+      for (const expenseItem of input.items) {
         this.validateAllocations(
-          item.allocations,
+          expenseItem.allocations,
           selected,
-          item.amountCents,
+          expenseItem.amountCents,
           'ITEM_ALLOCATIONS_MISMATCH',
         );
-        for (const allocation of item.allocations) {
+        for (const allocation of expenseItem.allocations) {
           allocatedByParticipant.set(
             allocation.eventParticipantId,
             (allocatedByParticipant.get(allocation.eventParticipantId) ?? 0) +
@@ -202,15 +202,15 @@ export class ExpensesService {
     totalCents: number,
     code: string,
   ): void {
-    const ids = allocations.map((allocation) => allocation.eventParticipantId);
+    const allocationParticipantIds = allocations.map((allocation) => allocation.eventParticipantId);
     ensure(
-      new Set(ids).size === ids.length,
+      new Set(allocationParticipantIds).size === allocationParticipantIds.length,
       422,
       'DUPLICATE_ALLOCATION',
       'Hay asignaciones duplicadas',
     );
     ensure(
-      ids.every((id) => selected.has(id)),
+      allocationParticipantIds.every((participantId) => selected.has(participantId)),
       422,
       'ALLOCATION_OUTSIDE_EXPENSE',
       'Una asignacion no pertenece al gasto',

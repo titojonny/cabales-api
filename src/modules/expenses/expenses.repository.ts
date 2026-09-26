@@ -84,6 +84,7 @@ export class ExpensesRepository {
   list(groupId: string) {
     return this.db.expense.findMany({
       where: { groupId },
+      take: 100,
       select: {
         id: true,
         eventId: true,

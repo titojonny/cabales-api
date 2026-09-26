@@ -4,7 +4,7 @@
 .prettierignore: sus patrones declarativos excluyen dependencias, artefactos, cobertura y lockfile sin requerir comentarios adicionales.
 .prettierrc.json: JSON no admite comentarios; este registro documenta que fija comillas simples, coma final y ancho 100.
 DOCUMENTACION.md: registra una línea por archivo mantenido, incluido el lockfile, y declara en README las salidas generadas no mantenidas.
-Dockerfile: documenta el build multi-etapa, Prisma generate, db push y el runtime sin migraciones versionadas.
+Dockerfile: documenta el build multi-etapa, Prisma generate y el runtime sin mutaciones de esquema al arrancar.
 README.md: contiene arquitectura, instalación, scripts, seguridad, contrato, invariantes, verificación, límites y principios.
 docker-compose.yml: comenta el alcance local y declara PostgreSQL, API Express, persistencia y healthcheck con claves oficiales.
 docs/openapi.yaml: comenta su función y documenta rutas, seguridad, parámetros, cuerpos, sobres y DTO implementados.

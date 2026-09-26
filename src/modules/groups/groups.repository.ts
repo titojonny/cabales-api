@@ -35,6 +35,7 @@ export class GroupsRepository {
   list(userId: string) {
     return this.db.group.findMany({
       where: { members: { some: { userId } } },
+      take: 100,
       select: {
         ...groupView,
         members: { where: { userId }, select: { id: true, role: true } },
@@ -54,7 +55,7 @@ export class GroupsRepository {
             id: true,
             role: true,
             joinedAt: true,
-            user: { select: { id: true, displayName: true, email: true, avatarUrl: true } },
+            user: { select: { id: true, displayName: true, avatarUrl: true } },
           },
           orderBy: { joinedAt: 'asc' },
         },

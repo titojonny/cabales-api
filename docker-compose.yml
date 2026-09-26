@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: cabales_local_only
     ports:
       # 5433 en el host para no chocar con un PostgreSQL de Windows u otros proyectos en 5432.
-      - '5433:5432'
+      - '127.0.0.1:5433:5432'
     volumes:
       - cabales-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -24,15 +24,15 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - '3000:3000'
+      - '127.0.0.1:3000:3000'
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgresql://cabales:cabales_local_only@postgres:5432/cabales?schema=public
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       COOKIE_NAME: cabales_session
       SESSION_TTL_HOURS: 168
-      TRUST_PROXY: 1
+      TRUST_PROXY: 0
     depends_on:
       postgres:
         condition: service_healthy

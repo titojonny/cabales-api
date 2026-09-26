@@ -12,7 +12,7 @@ La separación mínima es deliberada:
 - `src/shared`: errores, criptografía, validación y dominio puro de dinero/liquidación.
 - `src/modules`: módulos `auth`, `groups`, `events`, `expenses` y `settlements`.
 - Cada módulo separa schema Zod, servicio de negocio, repositorio Prisma y router HTTP.
-- `prisma/schema.prisma`: modelo completo de persistencia. No hay migraciones en este repositorio.
+- `prisma/schema.prisma`: modelo completo de persistencia. El despliegue no modifica el esquema al arrancar; las migraciones deben aplicarse explícitamente.
 - `docs/openapi.yaml`: contrato HTTP de la versión 1.
 
 Este repositorio no contiene interfaz de usuario. El cliente React está en `cabales-app`.
@@ -22,17 +22,17 @@ El dominio de dinero y liquidación no importa Express ni Prisma. Los repositori
 ## Requisitos
 
 - Node.js 20.19 o superior.
-- npm.
+- pnpm 11 o superior.
 - PostgreSQL 15 o superior. `docker-compose.yml` ofrece PostgreSQL 17 para desarrollo. El servicio `api` es opcional.
 
 ## Inicio local
 
 1. Crear la configuración local a partir de `.env.example` y cambiar cualquier credencial compartida.
 2. Iniciar PostgreSQL con `docker compose up -d postgres` o usar una instancia aislada propia. `docker compose up --build api` levanta Express en el puerto 3000.
-3. Instalar exactamente el lockfile con `npm ci`.
-4. Aplicar el esquema sin migraciones con `npm run db:push`.
-5. Insertar catálogos públicos con `npm run db:seed`.
-6. Iniciar desarrollo con `npm run dev`.
+3. Instalar exactamente el lockfile con `pnpm install --frozen-lockfile`.
+4. En desarrollo, aplicar el esquema con `pnpm db:push`. En un entorno gestionado, usar `pnpm db:migrate` después de añadir migraciones versionadas.
+5. Insertar catálogos públicos con `pnpm db:seed`.
+6. Iniciar desarrollo con `pnpm dev`.
 
 `db:reset` destruye y reconstruye la base indicada por `DATABASE_URL`; se debe usar únicamente contra una base desechable confirmada.
 
@@ -53,18 +53,19 @@ La configuración se valida con Zod antes de abrir el puerto o consultar la base
 
 ## Scripts
 
-- `npm run dev`: servidor con recarga.
-- `npm install` y `npm ci`: ejecutan `prisma generate` como `postinstall`, sin conectarse a la base.
-- `npm run build`: compila fuente a `dist`.
-- `npm start`: ejecuta el build.
-- `npm run lint`: analiza fuente y pruebas.
-- `npm run typecheck`: comprueba fuente, configuración y pruebas.
-- `npm test`: ejecuta Vitest sin requerir PostgreSQL.
-- `npm run format` y `npm run format:check`: aplica o verifica Prettier.
-- `npm run db:generate`: genera Prisma Client.
-- `npm run db:push`: sincroniza el schema con PostgreSQL sin crear migraciones.
-- `npm run db:seed`: carga logros idempotentes, sin usuarios ni contraseñas por defecto.
-- `npm run db:reset`: `db push --force-reset` seguido de seed; es destructivo.
+- `pnpm dev`: servidor con recarga.
+- `pnpm install`: ejecuta `prisma generate` como `postinstall`, sin conectarse a la base.
+- `pnpm build`: compila fuente a `dist`.
+- `pnpm start`: ejecuta el build.
+- `pnpm lint`: analiza fuente y pruebas.
+- `pnpm typecheck`: comprueba fuente, configuración y pruebas.
+- `pnpm test`: ejecuta Vitest sin requerir PostgreSQL.
+- `pnpm format` y `pnpm format:check`: aplica o verifica Prettier.
+- `pnpm db:generate`: genera Prisma Client.
+- `pnpm db:push`: sincroniza el schema con PostgreSQL para desarrollo; no debe usarse como paso automático de producción.
+- `pnpm db:migrate`: aplica migraciones versionadas con `prisma migrate deploy`.
+- `pnpm db:seed`: carga logros idempotentes, sin usuarios ni contraseñas por defecto.
+- `pnpm db:reset`: `db push --force-reset` seguido de seed; es destructivo.
 
 ## Contrato HTTP
 
@@ -107,7 +108,7 @@ Crear gasto y liquidación exige `Idempotency-Key`. Una respuesta se reproduce d
 - Existe como máximo una liquidación por evento. El cierre y sus transferencias son atómicos y cierran el evento.
 - El pago escribe una marca de versión en la liquidación dentro de una transacción serializable y ejecuta una actualización final idempotente; dos últimas transferencias concurrentes convergen a completada.
 
-Prisma no genera restricciones `CHECK`. Los servicios MVP verifican positividad, sumas, moneda, pertenencia y transiciones implementadas. Los modelos futuros todavía sin servicio solo documentan la intención y deberán incorporar validación antes de exponerse. Una implantación con migraciones gestionadas podría añadir `CHECK` como defensa adicional, pero este proyecto usa exclusivamente `db push` por requisito explícito.
+Prisma no genera restricciones `CHECK`. Los servicios MVP verifican positividad, sumas, moneda, pertenencia y transiciones implementadas. Los modelos futuros todavía sin servicio solo documentan la intención y deberán incorporar validación antes de exponerse. Las migraciones gestionadas deben añadir restricciones de base de datos como defensa adicional cuando el dominio lo permita.
 
 ## Seguridad
 
@@ -133,32 +134,34 @@ Balances, saldos de fondos, consumo de presupuestos y estadísticas no se almace
 
 Las pruebas unitarias cubren reparto exacto, entradas monetarias inválidas, determinismo, balances, reintentos acotados, expiración idempotente, URLs, DTO estrictos y pago repetido. Supertest cubre health, readiness fallido, sobre 404, límites auth, cache, cookies y recuperación CSRF sin conectarse a PostgreSQL. No se ejecutan pruebas destructivas ni integración contra una base del usuario.
 
-Comandos de verificación recomendados:
+Comandos de verificación:
 
 ```sh
-npm ci
-npm run db:generate
-npx prisma format
-npx prisma validate
-npm run lint
-npm run typecheck
-npm test
-npm run build
-npm run format:check
+pnpm install --frozen-lockfile
+pnpm db:generate
+pnpm exec prisma format
+pnpm exec prisma validate
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm format:check
 ```
 
 Para `prisma validate` basta una URL PostgreSQL sintácticamente válida; no abre una conexión.
+
+La verificación actual del repositorio pasa typecheck, lint, formato, build y las 28 pruebas de API. Las pruebas de integración contra PostgreSQL y las pruebas de concurrencia requieren una base aislada y no forman parte de la ejecución local predeterminada.
 
 ## Límites actuales
 
 - El MVP implementa API para autenticación, grupos, invitaciones, eventos, gastos manuales y liquidaciones. Fondos, OCR, documentos, presupuestos, recurrencia, notificaciones y logros están modelados pero aún no tienen endpoints.
 - No hay edición ni borrado de gastos financieros; al cerrar el evento quedan inmutables por diseño.
 - Los invitados no tienen identidad autenticada y una transferencia suya debe marcarla un OWNER o ADMIN.
-- No se envían correos: el token de invitación se devuelve una sola vez al creador para integrarlo después con un proveedor.
+- No se envían correos: el token de invitación se devuelve una sola vez al creador y el cliente lo transporta en un fragmento de URL, que no se envía en la cabecera Referer.
 - El claim de invitación es un `updateMany` condicional atómico antes del `upsert` de membresía.
 - Los bloqueos `FOR UPDATE`/`FOR SHARE`, carreras de FK y colisiones únicas se implementan para PostgreSQL, pero requieren una prueba de concurrencia contra una base aislada que no se ejecutó en esta tarea.
 - `DOCUMENTACION.md` incluye cada archivo mantenido y `package-lock.json`; excluye `node_modules`, `dist`, cobertura y Prisma Client generado, que no se versionan ni se mantienen manualmente.
-- `npm audit` puede señalar `deepmerge-ts` transitivo del CLI Prisma 7. La corrección automática propuesta baja a Prisma 6 y no se aplica porque contradice el requisito; el paquete afecta tooling, no el proceso HTTP de producción.
+- Las migraciones versionadas viven en `prisma/migrations`; `pnpm db:migrate` aplica únicamente las migraciones existentes y no cambia el esquema automáticamente al arrancar.
 
 ## Principios aplicados
 

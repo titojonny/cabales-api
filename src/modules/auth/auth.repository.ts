@@ -24,6 +24,62 @@ export class AuthRepository {
     });
   }
 
+  async createEmailVerificationToken(input: {
+    userId: string;
+    tokenHash: string;
+    expiresAt: Date;
+  }) {
+    return this.db.emailVerificationToken.create({ data: input });
+  }
+
+  async findUserByEmail(email: string) {
+    return this.db.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, isActive: true, emailVerifiedAt: true },
+    });
+  }
+
+  async claimEmailVerification(tokenHash: string) {
+    const result = await this.db.emailVerificationToken.updateMany({
+      where: { tokenHash, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
+    if (result.count !== 1) return null;
+    const token = await this.db.emailVerificationToken.findUnique({ where: { tokenHash } });
+    if (!token) return null;
+    return this.db.user.update({
+      where: { id: token.userId },
+      data: { emailVerifiedAt: new Date() },
+      select: publicUser,
+    });
+  }
+
+  async createPasswordResetToken(input: { userId: string; tokenHash: string; expiresAt: Date }) {
+    return this.db.passwordResetToken.create({ data: input });
+  }
+
+  async claimPasswordReset(tokenHash: string) {
+    const result = await this.db.passwordResetToken.updateMany({
+      where: { tokenHash, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
+    if (result.count !== 1) return null;
+    return this.db.passwordResetToken.findUnique({ where: { tokenHash } });
+  }
+
+  async updatePasswordAndRevokeSessions(userId: string, passwordHash: string) {
+    await this.db.$transaction([
+      this.db.account.updateMany({
+        where: { userId, provider: AccountProvider.PASSWORD },
+        data: { passwordHash },
+      }),
+      this.db.session.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+  }
+
   async findPasswordAccount(email: string) {
     return this.db.account.findUnique({
       where: {

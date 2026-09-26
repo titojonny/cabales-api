@@ -49,6 +49,7 @@ export class EventsRepository {
   list(groupId: string) {
     return this.db.event.findMany({
       where: { groupId },
+      take: 100,
       select: {
         ...eventView,
         _count: { select: { participants: true, expenses: true } },

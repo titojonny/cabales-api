@@ -187,6 +187,7 @@ export class SettlementsRepository {
   list(groupId: string) {
     return this.db.settlement.findMany({
       where: { groupId },
+      take: 100,
       select: {
         id: true,
         eventId: true,

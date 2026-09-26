@@ -18,6 +18,10 @@ const envSchema = z.object({
     .default('cabales_session'),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  EMAIL_VERIFICATION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(120).default(30),
+  APP_ORIGIN: z.string().url().default('http://localhost:5173'),
+  EMAIL_PROVIDER: z.enum(['logging']).default('logging'),
   TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
@@ -32,12 +36,27 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
     throw new Error(`Configuracion invalida: ${z.prettifyError(parsed.error)}`);
   }
 
-  return {
+  const config = {
     ...parsed.data,
     corsOrigins: parsed.data.CORS_ORIGINS.split(',')
       .map((origin) => origin.trim())
       .filter(Boolean),
     sessionTtlMs: parsed.data.SESSION_TTL_HOURS * 60 * 60 * 1000,
+    emailVerificationTtlMs: parsed.data.EMAIL_VERIFICATION_TTL_HOURS * 60 * 60 * 1000,
+    passwordResetTtlMs: parsed.data.PASSWORD_RESET_TTL_MINUTES * 60 * 1000,
     isProduction: parsed.data.NODE_ENV === 'production',
   };
+
+  if (
+    config.isProduction &&
+    config.corsOrigins.some((origin) =>
+      /^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin),
+    )
+  ) {
+    throw new Error(
+      'Configuracion invalida: CORS_ORIGINS de produccion no puede incluir localhost',
+    );
+  }
+
+  return config;
 }
