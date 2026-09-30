@@ -98,6 +98,17 @@ enum PrivacyRequestType {
   PORTABILITY
 }
 
+enum RetentionRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum RetentionTrigger {
+  MANUAL
+  SCHEDULED
+}
+
 enum PrivacyRequestStatus {
   PENDING
   IN_PROGRESS
@@ -108,39 +119,44 @@ enum PrivacyRequestStatus {
 
 /// Identidad principal; los totales y estadísticas se calculan desde gastos y liquidaciones.
 model User {
-  id                   String                  @id @default(uuid()) @db.Uuid
-  email                String                  @unique @db.VarChar(320)
-  displayName          String                  @db.VarChar(120)
-  avatarUrl            String?                 @db.VarChar(2048)
-  locale               String                  @default("es") @db.VarChar(10)
-  emailVerifiedAt      DateTime?
-  isActive             Boolean                 @default(true)
-  createdAt            DateTime                @default(now())
-  updatedAt            DateTime                @updatedAt
-  accounts             Account[]
-  sessions             Session[]
-  groupMemberships     GroupMember[]
-  sentInvitations      GroupInvitation[]       @relation("InvitationSender")
-  acceptedInvitations  GroupInvitation[]       @relation("InvitationAcceptor")
-  createdGroups        Group[]                 @relation("GroupCreator")
-  createdEvents        Event[]                 @relation("EventCreator")
-  createdExpenses      Expense[]               @relation("ExpenseCreator")
-  createdSettlements   Settlement[]            @relation("SettlementCreator")
-  paidTransfers        SettlementTransfer[]    @relation("TransferMarker")
-  createdFunds         Fund[]                  @relation("FundCreator")
-  createdFundMovements FundMovement[]          @relation("FundMovementCreator")
-  transferChanges      TransferStatusHistory[] @relation("TransferStatusChanger")
-  documents            Document[]              @relation("DocumentOwner")
-  documentGrants       DocumentAccessGrant[]
-  documentLogs         DocumentAccessLog[]
-  pushSubscriptions    PushSubscription[]
-  notifications        Notification[]
-  achievements         UserAchievement[]
-  idempotencyKeys      IdempotencyKey[]
-  auditLogs            AuditLog[]
+  id                      String                   @id @default(uuid()) @db.Uuid
+  email                   String                   @unique @db.VarChar(320)
+  displayName             String                   @db.VarChar(120)
+  avatarUrl               String?                  @db.VarChar(2048)
+  locale                  String                   @default("es") @db.VarChar(10)
+  emailVerifiedAt         DateTime?
+  isActive                Boolean                  @default(true)
+  /// Marca de anonimización tras una solicitud de supresión confirmada.
+  deletedAt               DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  accounts                Account[]
+  sessions                Session[]
+  groupMemberships        GroupMember[]
+  sentInvitations         GroupInvitation[]        @relation("InvitationSender")
+  acceptedInvitations     GroupInvitation[]        @relation("InvitationAcceptor")
+  createdGroups           Group[]                  @relation("GroupCreator")
+  createdEvents           Event[]                  @relation("EventCreator")
+  createdExpenses         Expense[]                @relation("ExpenseCreator")
+  createdSettlements      Settlement[]             @relation("SettlementCreator")
+  paidTransfers           SettlementTransfer[]     @relation("TransferMarker")
+  createdFunds            Fund[]                   @relation("FundCreator")
+  createdFundMovements    FundMovement[]           @relation("FundMovementCreator")
+  transferChanges         TransferStatusHistory[]  @relation("TransferStatusChanger")
+  documents               Document[]               @relation("DocumentOwner")
+  documentGrants          DocumentAccessGrant[]
+  documentLogs            DocumentAccessLog[]
+  pushSubscriptions       PushSubscription[]
+  notifications           Notification[]
+  achievements            UserAchievement[]
+  idempotencyKeys         IdempotencyKey[]
+  auditLogs               AuditLog[]
   emailVerificationTokens EmailVerificationToken[]
-  passwordResetTokens  PasswordResetToken[]
-  privacyRequests      PrivacyRequest[]
+  passwordResetTokens     PasswordResetToken[]
+  privacyRequests         PrivacyRequest[]
+  requestedOcrJobs        OcrJob[]                 @relation("OcrJobRequester")
+  createdBudgets          Budget[]                 @relation("BudgetCreator")
+  notificationPreferences NotificationPreference[]
 }
 
 /// Credencial desacoplada para permitir otros proveedores sin contaminar User.
@@ -230,12 +246,17 @@ model GroupInvitation {
   expiresAt    DateTime
   acceptedById String?          @db.Uuid
   acceptedAt   DateTime?
+  revokedAt    DateTime?
+  revokedById  String?          @db.Uuid
+  lastSentAt   DateTime?
+  sendCount    Int              @default(1)
   createdAt    DateTime         @default(now())
   group        Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
   invitedBy    User             @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
   acceptedBy   User?            @relation("InvitationAcceptor", fields: [acceptedById], references: [id], onDelete: SetNull)
 
   @@index([groupId, status])
+  @@index([groupId, email, status])
   @@index([invitedById])
   @@index([email, status])
   @@index([expiresAt])
@@ -257,6 +278,7 @@ model Event {
   links        EventLink[]
   expenses     Expense[]
   settlement   Settlement?
+  documents    Document[]
 
   @@index([groupId, startsAt])
   @@index([groupId, status])
@@ -294,28 +316,30 @@ model EventLink {
 
 /// Gasto inmutable en centavos una vez incluido en una liquidación.
 model Expense {
-  id           String               @id @default(uuid()) @db.Uuid
-  groupId      String               @db.Uuid
-  eventId      String               @db.Uuid
-  title        String               @db.VarChar(160)
-  notes        String?              @db.VarChar(1000)
-  totalCents   Int
-  currency     String               @db.Char(3)
-  splitMode    SplitMode
-  occurredAt   DateTime
-  createdById  String               @db.Uuid
-  categoryId   String?              @db.Uuid
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
-  group        Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  event        Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  createdBy    User                 @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  category     Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  participants ExpenseParticipant[]
-  payers       ExpensePayer[]
-  items        ExpenseItem[]
-  receipts     Receipt[]
-  tags         ExpenseTag[]
+  id               String               @id @default(uuid()) @db.Uuid
+  groupId          String               @db.Uuid
+  eventId          String               @db.Uuid
+  title            String               @db.VarChar(160)
+  notes            String?              @db.VarChar(1000)
+  totalCents       Int
+  currency         String               @db.Char(3)
+  splitMode        SplitMode
+  occurredAt       DateTime
+  createdById      String               @db.Uuid
+  categoryId       String?              @db.Uuid
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  group            Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event            Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdBy        User                 @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  category         Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  participants     ExpenseParticipant[]
+  payers           ExpensePayer[]
+  items            ExpenseItem[]
+  receipts         Receipt[]
+  tags             ExpenseTag[]
+  documents        Document[]
+  confirmedOcrJobs OcrJob[]             @relation("OcrJobConfirmedExpense")
 
   @@index([groupId, occurredAt])
   @@index([eventId, occurredAt])
@@ -391,19 +415,32 @@ model Receipt {
   @@index([expenseId])
 }
 
+/// Trabajo OCR asíncrono; su resultado es una propuesta y nunca modifica gastos sin confirmación.
 model OcrJob {
-  id            String       @id @default(uuid()) @db.Uuid
-  receiptId     String       @db.Uuid
-  status        OcrJobStatus @default(PENDING)
-  extractedData Json?
-  errorCode     String?      @db.VarChar(80)
-  attempts      Int          @default(0)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  receipt       Receipt      @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  id                 String       @id @default(uuid()) @db.Uuid
+  receiptId          String?      @db.Uuid
+  documentId         String?      @db.Uuid
+  requestedById      String?      @db.Uuid
+  status             OcrJobStatus @default(PENDING)
+  extractedData      Json?
+  errorCode          String?      @db.VarChar(80)
+  attempts           Int          @default(0)
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  confirmedAt        DateTime?
+  confirmedExpenseId String?      @db.Uuid
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  receipt            Receipt?     @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  document           Document?    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  requestedBy        User?        @relation("OcrJobRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  confirmedExpense   Expense?     @relation("OcrJobConfirmedExpense", fields: [confirmedExpenseId], references: [id], onDelete: SetNull)
 
   @@index([receiptId, status])
   @@index([status, createdAt])
+  @@index([documentId, createdAt])
+  @@index([requestedById, createdAt])
+  @@index([confirmedExpenseId])
 }
 
 /// Cierre único por evento calculado desde gastos; no duplica balances derivados.
@@ -421,6 +458,7 @@ model Settlement {
   event       Event                @relation(fields: [eventId], references: [id], onDelete: Restrict)
   createdBy   User                 @relation("SettlementCreator", fields: [createdById], references: [id], onDelete: Restrict)
   transfers   SettlementTransfer[]
+  documents   Document[]
 
   @@index([groupId, createdAt])
   @@index([createdById])
@@ -469,9 +507,12 @@ model Fund {
   id          String         @id @default(uuid()) @db.Uuid
   groupId     String         @db.Uuid
   name        String         @db.VarChar(120)
+  description String?        @db.VarChar(500)
   currency    String         @db.Char(3)
   createdById String         @db.Uuid
+  archivedAt  DateTime?
   createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @default(now()) @updatedAt
   group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
   createdBy   User           @relation("FundCreator", fields: [createdById], references: [id], onDelete: Restrict)
   members     FundMember[]
@@ -491,6 +532,7 @@ model FundMember {
   groupMember   GroupMember @relation(fields: [groupMemberId], references: [id], onDelete: Cascade)
 
   @@unique([fundId, groupMemberId])
+  @@index([groupMemberId])
 }
 
 /// Movimiento firmado: positivo ingresa fondos y negativo los retira; saldo siempre derivado.
@@ -544,18 +586,23 @@ model ExpenseTag {
 
 /// Límite configurado; consumo del presupuesto se deriva de Expense.
 model Budget {
-  id          String       @id @default(uuid()) @db.Uuid
-  groupId     String       @db.Uuid
-  categoryId  String?      @db.Uuid
-  name        String       @db.VarChar(120)
-  amountCents Int
-  currency    String       @db.Char(3)
-  period      BudgetPeriod
-  startsAt    DateTime
-  endsAt      DateTime?
-  createdAt   DateTime     @default(now())
-  group       Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  id                    String       @id @default(uuid()) @db.Uuid
+  groupId               String       @db.Uuid
+  categoryId            String?      @db.Uuid
+  name                  String       @db.VarChar(120)
+  amountCents           Int
+  currency              String       @db.Char(3)
+  period                BudgetPeriod
+  startsAt              DateTime
+  endsAt                DateTime?
+  /// Porcentaje de consumo (1-100) que dispara la alerta del periodo.
+  alertThresholdPercent Int          @default(80)
+  createdById           String?      @db.Uuid
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @default(now()) @updatedAt
+  group                 Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  category              Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdBy             User?        @relation("BudgetCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([groupId, startsAt])
   @@index([categoryId])
@@ -578,21 +625,33 @@ model RecurringExpense {
 }
 
 model Document {
-  id         String                @id @default(uuid()) @db.Uuid
-  groupId    String?               @db.Uuid
-  ownerId    String                @db.Uuid
-  name       String                @db.VarChar(255)
-  storageKey String                @unique @db.VarChar(512)
-  mimeType   String                @db.VarChar(100)
-  createdAt  DateTime              @default(now())
-  updatedAt  DateTime              @updatedAt
-  group      Group?                @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  owner      User                  @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  grants     DocumentAccessGrant[]
-  logs       DocumentAccessLog[]
+  id             String                @id @default(uuid()) @db.Uuid
+  groupId        String?               @db.Uuid
+  ownerId        String                @db.Uuid
+  name           String                @db.VarChar(255)
+  storageKey     String                @unique @db.VarChar(512)
+  mimeType       String                @db.VarChar(100)
+  sizeBytes      Int                   @default(0)
+  checksumSha256 String?               @db.Char(64)
+  eventId        String?               @db.Uuid
+  expenseId      String?               @db.Uuid
+  settlementId   String?               @db.Uuid
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  group          Group?                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  owner          User                  @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  event          Event?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  expense        Expense?              @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  settlement     Settlement?           @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  grants         DocumentAccessGrant[]
+  logs           DocumentAccessLog[]
+  ocrJobs        OcrJob[]
 
-  @@index([groupId])
-  @@index([ownerId])
+  @@index([groupId, createdAt])
+  @@index([ownerId, createdAt])
+  @@index([eventId])
+  @@index([expenseId])
+  @@index([settlementId])
 }
 
 model DocumentAccessGrant {
@@ -635,18 +694,36 @@ model PushSubscription {
 }
 
 model Notification {
-  id        String             @id @default(uuid()) @db.Uuid
-  userId    String             @db.Uuid
-  type      String             @db.VarChar(80)
-  title     String             @db.VarChar(160)
-  body      String             @db.VarChar(1000)
-  data      Json?
-  status    NotificationStatus @default(UNREAD)
-  createdAt DateTime           @default(now())
-  readAt    DateTime?
-  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String             @id @default(uuid()) @db.Uuid
+  userId     String             @db.Uuid
+  type       String             @db.VarChar(80)
+  title      String             @db.VarChar(160)
+  body       String             @db.VarChar(1000)
+  data       Json?
+  status     NotificationStatus @default(UNREAD)
+  /// Clave opcional que hace idempotente la emisión de un mismo aviso.
+  dedupeKey  String?            @db.VarChar(200)
+  createdAt  DateTime           @default(now())
+  readAt     DateTime?
+  archivedAt DateTime?
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, dedupeKey])
   @@index([userId, status, createdAt])
+  @@index([createdAt])
+}
+
+/// Preferencias por tipo de aviso; la ausencia de fila usa los valores por defecto del servicio.
+model NotificationPreference {
+  userId    String   @db.Uuid
+  type      String   @db.VarChar(80)
+  inApp     Boolean  @default(true)
+  email     Boolean  @default(false)
+  push      Boolean  @default(false)
+  updatedAt DateTime @default(now()) @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type])
 }
 
 model Achievement {
@@ -706,13 +783,13 @@ model AuditLog {
 
 /// Token efímero de verificación; solo se persiste su hash.
 model EmailVerificationToken {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @db.Uuid
-  tokenHash String   @unique @db.Char(64)
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique @db.Char(64)
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
   @@index([expiresAt])
@@ -720,13 +797,13 @@ model EmailVerificationToken {
 
 /// Token efímero de recuperación; su uso invalida sesiones y el propio token.
 model PasswordResetToken {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @db.Uuid
-  tokenHash String   @unique @db.Char(64)
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique @db.Char(64)
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
   @@index([expiresAt])
@@ -734,18 +811,40 @@ model PasswordResetToken {
 
 /// Solicitud de derechos de privacidad con ciclo de vida auditable.
 model PrivacyRequest {
-  id          String              @id @default(uuid()) @db.Uuid
-  userId      String              @db.Uuid
-  type        PrivacyRequestType
-  status      PrivacyRequestStatus @default(PENDING)
-  reason      String?             @db.VarChar(1000)
-  completedAt DateTime?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String               @id @default(uuid()) @db.Uuid
+  userId          String               @db.Uuid
+  type            PrivacyRequestType
+  status          PrivacyRequestStatus @default(PENDING)
+  reason          String?              @db.VarChar(1000)
+  confirmedAt     DateTime?
+  cancelledAt     DateTime?
+  completedAt     DateTime?
+  /// Fin de disponibilidad de la exportación generada bajo demanda.
+  exportExpiresAt DateTime?
+  /// Resumen sin datos personales (conteos) del resultado de la solicitud.
+  resultSummary   Json?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status, createdAt])
   @@index([status, createdAt])
+  @@index([type, status])
+}
+
+/// Ejecución auditable del job de retención; solo guarda conteos, nunca contenido borrado.
+model RetentionRun {
+  id         String             @id @default(uuid()) @db.Uuid
+  trigger    RetentionTrigger
+  status     RetentionRunStatus @default(RUNNING)
+  dryRun     Boolean            @default(false)
+  counts     Json?
+  errorCode  String?            @db.VarChar(80)
+  startedAt  DateTime           @default(now())
+  finishedAt DateTime?
+
+  @@index([startedAt])
+  @@index([status, startedAt])
 }
 
 // Prisma no emite CHECK: los servicios MVP verifican participantes, enteros positivos,

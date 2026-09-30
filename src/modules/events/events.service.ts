@@ -1,6 +1,7 @@
 import { GroupRole } from '@prisma/client';
 import { ensure } from '../../shared/errors.js';
 import type { GroupsService } from '../groups/groups.service.js';
+import type { DomainEvents } from '../../shared/events.js';
 import type { CreateEventInput } from './events.schema.js';
 import type { EventsRepository } from './events.repository.js';
 
@@ -9,6 +10,7 @@ export class EventsService {
   constructor(
     private readonly repository: EventsRepository,
     private readonly groups: GroupsService,
+    private readonly events?: DomainEvents,
   ) {}
 
   async create(userId: string, groupId: string, input: CreateEventInput) {
@@ -38,7 +40,9 @@ export class EventsService {
       'PARTICIPANT_OUTSIDE_GROUP',
       'Un participante no pertenece al grupo',
     );
-    return this.repository.create(groupId, userId, membership.id, input);
+    const event = await this.repository.create(groupId, userId, membership.id, input);
+    this.events?.emit({ type: 'event.created', groupId, eventId: event.id, userId });
+    return event;
   }
 
   async list(userId: string, groupId: string) {

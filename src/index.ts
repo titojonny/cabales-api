@@ -1,62 +1,34 @@
-import { Prisma } from '@prisma/client';
 import { loadConfig } from './config/env.js';
 import { createLogger } from './config/logger.js';
-import { createDatabase } from './database/client.js';
-import { createApp } from './http/app.js';
-import { AuthRepository } from './modules/auth/auth.repository.js';
-import { AuthService } from './modules/auth/auth.service.js';
-import { EventsRepository } from './modules/events/events.repository.js';
-import { EventsService } from './modules/events/events.service.js';
-import { ExpensesRepository } from './modules/expenses/expenses.repository.js';
-import { ExpensesService } from './modules/expenses/expenses.service.js';
-import { GroupsRepository } from './modules/groups/groups.repository.js';
-import { GroupsService } from './modules/groups/groups.service.js';
-import { SettlementsRepository } from './modules/settlements/settlements.repository.js';
-import { SettlementsService } from './modules/settlements/settlements.service.js';
-import { LoggingEmailProvider } from './infrastructure/email.js';
+import { createContainer } from './composition.js';
 
 const config = loadConfig();
 const logger = createLogger(config.LOG_LEVEL);
-const db = createDatabase(config.DATABASE_URL);
-const groups = new GroupsService(new GroupsRepository(db));
-const auth = new AuthService(
-  new AuthRepository(db),
-  config.sessionTtlMs,
-  new LoggingEmailProvider(),
-  config.emailVerificationTtlMs,
-  config.passwordResetTtlMs,
-  config.APP_ORIGIN,
-);
-const events = new EventsService(new EventsRepository(db), groups);
-const expenses = new ExpensesService(new ExpensesRepository(db), groups);
-const settlements = new SettlementsService(new SettlementsRepository(db), groups);
-
-const app = createApp({
+config.warnings.forEach((warning) => logger.warn({ config: true }, warning));
+const { app, db, background, rateLimitStores, storage, email, ocrProvider } = createContainer(
   config,
   logger,
-  auth,
-  groups,
-  events,
-  expenses,
-  settlements,
-  readiness: async () => {
-    try {
-      await db.$queryRaw(Prisma.sql`SELECT 1`);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-});
-
-const server = app.listen(config.PORT, () =>
-  logger.info({ port: config.PORT }, 'Cabales API iniciada'),
 );
 
-/** Cierra listener y pool sin aceptar trabajo nuevo. */
+const server = app.listen(config.PORT, () =>
+  logger.info(
+    {
+      port: config.PORT,
+      email: email.name,
+      ocr: ocrProvider.name,
+      storage: storage.name,
+      rateLimitStore: rateLimitStores.kind,
+    },
+    'Cabales API iniciada',
+  ),
+);
+
+/** Cierra listener, termina tareas en curso y libera conexiones sin aceptar trabajo nuevo. */
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Cierre controlado');
   server.close(async () => {
+    await Promise.race([background.drain(), new Promise((resolve) => setTimeout(resolve, 10_000))]);
+    await rateLimitStores.close();
     await db.$disconnect();
     process.exit(0);
   });

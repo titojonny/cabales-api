@@ -5,6 +5,7 @@ import type { AppLogger } from '../config/logger.js';
 import type { AuthPort } from '../modules/auth/auth.service.js';
 import { hashToken } from '../shared/crypto.js';
 import { AppError } from '../shared/errors.js';
+import { ExternalProviderError } from '../infrastructure/errors.js';
 
 /** Propaga un identificador acotado o genera uno nuevo para toda solicitud. */
 export function requestContext(req: Request, res: Response, next: NextFunction): void {
@@ -76,21 +77,48 @@ export function notFound(req: Request, _res: Response, next: NextFunction): void
   next(new AppError(404, 'NOT_FOUND', `Ruta no encontrada: ${req.method} ${req.path}`));
 }
 
+/** Traduce cualquier error a un AppError con código estable. */
+export function classifyError(error: unknown): AppError {
+  if (error instanceof AppError) return error;
+  if (error instanceof ZodError)
+    return new AppError(400, 'VALIDATION_ERROR', 'Entrada invalida', error.issues);
+  if (error instanceof ExternalProviderError) {
+    return new AppError(
+      503,
+      'PROVIDER_UNAVAILABLE',
+      'Un servicio externo no esta disponible; intenta mas tarde',
+    );
+  }
+  const parserError = error as { type?: string; status?: number };
+  if (parserError.type === 'entity.too.large' || parserError.status === 413) {
+    return new AppError(413, 'PAYLOAD_TOO_LARGE', 'El cuerpo excede el limite permitido');
+  }
+  if (parserError.type === 'entity.parse.failed') {
+    return new AppError(400, 'INVALID_JSON', 'El cuerpo JSON no es valido');
+  }
+  if (parserError.type === 'encoding.unsupported' || parserError.status === 415) {
+    return new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Tipo de contenido no admitido');
+  }
+  if (parserError.status === 400)
+    return new AppError(400, 'INVALID_JSON', 'El cuerpo JSON no es valido');
+  return new AppError(500, 'INTERNAL_ERROR', 'Error interno controlado');
+}
+
 /** Centraliza errores, registra contexto mínimo y evita filtrar detalles internos. */
 export function errorHandler(logger: AppLogger): ErrorRequestHandler {
   return (error: unknown, req: Request, res: Response, _next: NextFunction): void => {
-    const parserError = error as { type?: string; status?: number };
-    const controlled =
-      error instanceof AppError
-        ? error
-        : error instanceof ZodError
-          ? new AppError(400, 'VALIDATION_ERROR', 'Entrada invalida', error.issues)
-          : parserError.type === 'entity.too.large' || parserError.status === 413
-            ? new AppError(413, 'PAYLOAD_TOO_LARGE', 'El cuerpo excede el limite permitido')
-            : parserError.type === 'entity.parse.failed' || parserError.status === 400
-              ? new AppError(400, 'INVALID_JSON', 'El cuerpo JSON no es valido')
-              : new AppError(500, 'INTERNAL_ERROR', 'Error interno controlado');
-
+    const controlled = classifyError(error);
+    if (controlled.status >= 500 && !(error instanceof AppError)) {
+      // Solo nombre y código: nunca mensajes de Prisma, SQL ni datos de entrada.
+      logger.error(
+        {
+          requestId: req.requestId,
+          errorName: (error as Error)?.name,
+          errorCode: (error as { code?: unknown })?.code,
+        },
+        'Error no controlado',
+      );
+    }
     const log = controlled.status >= 500 ? logger.error.bind(logger) : logger.warn.bind(logger);
     log(
       { requestId: req.requestId, code: controlled.code, status: controlled.status },

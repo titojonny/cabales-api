@@ -2,6 +2,9 @@
 node_modules/
 npm-debug.log*
 
+# Documentos locales subidos (datos personales)
+storage/
+
 # Compilados
 dist/
 build/

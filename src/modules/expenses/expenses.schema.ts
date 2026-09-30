@@ -14,6 +14,7 @@ export const createExpenseSchema = z
     eventId: z.string().uuid(),
     title: z.string().trim().min(1).max(160),
     notes: z.string().trim().max(1000).optional(),
+    categoryId: z.string().uuid().optional(),
     totalCents: cents,
     currency: z
       .string()

@@ -6,6 +6,8 @@ declare global {
     interface Request {
       requestId: string;
       auth?: AuthContext;
+      /** Query validada y normalizada por validateQuery. */
+      validatedQuery?: unknown;
     }
   }
 }

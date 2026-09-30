@@ -2,10 +2,10 @@
 openapi: 3.1.0
 info:
   title: Cabales API
-  version: 1.1.0
+  version: 1.2.0
   license: { name: ISC, identifier: ISC }
   description: >-
-    API de autenticación, grupos, eventos, gastos exactos y liquidaciones en centavos.
+    API de autenticación, grupos, eventos, gastos exactos, liquidaciones, fondos, presupuestos, documentos, OCR, Cabudas, estadísticas, avisos, logros y privacidad. Importes en centavos.
     Todas las respuestas /api/v1 usan Cache-Control private, no-store; health y ready usan no-store.
 servers:
   - url: /
@@ -22,6 +22,24 @@ tags:
     description: Gastos manuales y reparto exacto.
   - name: Settlements
     description: Cierres y transferencias.
+  - name: Funds
+    description: 'Fondos comunes con saldo derivado de movimientos inmutables.'
+  - name: Budgets
+    description: 'Presupuestos por periodo con alertas.'
+  - name: Documents
+    description: 'Documentos privados con permisos y URLs firmadas.'
+  - name: OCR
+    description: 'Lectura asíncrona de comprobantes con confirmación humana.'
+  - name: Cabudas
+    description: 'Deudas consolidadas del usuario.'
+  - name: Statistics
+    description: 'Agregados de gasto autorizados.'
+  - name: Notifications
+    description: 'Avisos internos, preferencias y Web Push.'
+  - name: Achievements
+    description: 'Logros de uso con reglas transparentes.'
+  - name: Privacy
+    description: 'Derechos ARCO-POL, exportación y supresión.'
 paths:
   /health:
     get:
@@ -93,6 +111,29 @@ paths:
       security: [{ sessionCookie: [], csrfCookie: [] }]
       responses:
         '200': { $ref: '#/components/responses/AuthSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    patch:
+      tags: [Auth]
+      summary: 'Rectifica nombre visible o idioma del titular'
+      operationId: updateMe
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfilePatch' }
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
@@ -170,6 +211,38 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/groups/{groupId}/invitations:
+    get:
+      tags: [Groups]
+      summary: 'Lista invitaciones del grupo (propietario o administrador)'
+      operationId: listInvitations
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: status
+          in: query
+          required: false
+          schema:
+            enum: [PENDING, ACCEPTED, REVOKED, EXPIRED]
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Invitation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
     post:
       tags: [Groups]
       summary: Crea una invitación y devuelve su token una sola vez
@@ -372,6 +445,2057 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/email-verification/request:
+    post:
+      tags: [Auth]
+      summary: 'Solicita verificación de correo sin revelar si la cuenta existe'
+      operationId: requestEmailVerification
+      description: 'Límite por IP y por hash de correo; enfriamiento de 60 s y el token anterior queda invalidado. El enlace lleva el token en el fragmento (#token=) para que no llegue a logs del servidor.'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmailInput' }
+      responses:
+        '202':
+          description: 'Aceptada; respuesta idéntica exista o no la cuenta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcceptedEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/auth/email-verification/resend:
+    post:
+      tags: [Auth]
+      summary: 'Reenvía verificación de correo sin revelar si la cuenta existe'
+      operationId: resendEmailVerification
+      description: 'Límite por IP y por hash de correo; enfriamiento de 60 s y el token anterior queda invalidado. El enlace lleva el token en el fragmento (#token=) para que no llegue a logs del servidor.'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmailInput' }
+      responses:
+        '202':
+          description: 'Aceptada; respuesta idéntica exista o no la cuenta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcceptedEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/auth/password-recovery/request:
+    post:
+      tags: [Auth]
+      summary: 'Solicita recuperación de contraseña sin revelar si la cuenta existe'
+      operationId: requestPasswordRecovery
+      description: 'Límite por IP y por hash de correo; enfriamiento de 60 s y el token anterior queda invalidado. El enlace lleva el token en el fragmento (#token=) para que no llegue a logs del servidor.'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmailInput' }
+      responses:
+        '202':
+          description: 'Aceptada; respuesta idéntica exista o no la cuenta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcceptedEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/auth/password-recovery/resend:
+    post:
+      tags: [Auth]
+      summary: 'Reenvía recuperación de contraseña sin revelar si la cuenta existe'
+      operationId: resendPasswordRecovery
+      description: 'Límite por IP y por hash de correo; enfriamiento de 60 s y el token anterior queda invalidado. El enlace lleva el token en el fragmento (#token=) para que no llegue a logs del servidor.'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmailInput' }
+      responses:
+        '202':
+          description: 'Aceptada; respuesta idéntica exista o no la cuenta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AcceptedEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/auth/email-verification/confirm:
+    post:
+      tags: [Auth]
+      summary: 'Confirma el correo con un token de un solo uso'
+      operationId: confirmEmailVerification
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TokenInput' }
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/password-recovery/confirm:
+    post:
+      tags: [Auth]
+      summary: 'Restablece la contraseña, revoca todas las sesiones y limpia cookies'
+      operationId: confirmPasswordRecovery
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordResetInput' }
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [reset]
+                    properties:
+                      reset:
+                        const: true
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/invitations/{invitationId}/resend:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      tags: [Groups]
+      summary: 'Reenvía rotando el token; reabre invitaciones vencidas'
+      operationId: resendInvitation
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvitationEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/invitations/{invitationId}/revoke:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      tags: [Groups]
+      summary: 'Revoca una invitación pendiente'
+      operationId: revokeInvitation
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Invitation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/invitations/preview:
+    post:
+      tags: [Groups]
+      summary: 'Previsualiza una invitación sin aceptarla'
+      operationId: previewInvitation
+      description: 'No revela el correo invitado; solo indica si coincide con la sesión.'
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcceptInvitationInput' }
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/InvitationPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/categories:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Groups]
+      summary: 'Lista categorías del grupo'
+      operationId: listCategories
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Category' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Groups]
+      summary: 'Crea una categoría (propietario o administrador)'
+      operationId: createCategory
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '201':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/categories/{categoryId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/CategoryId'
+    delete:
+      tags: [Groups]
+      summary: 'Elimina una categoría; los gastos quedan sin categoría'
+      operationId: deleteCategory
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/funds:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Funds]
+      summary: 'Lista fondos visibles con saldo derivado'
+      operationId: listFunds
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Fund' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Funds]
+      summary: 'Crea un fondo; el creador queda como gestor'
+      operationId: createFund
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundInput' }
+      responses:
+        '201':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Fund' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/funds/{fundId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/FundId'
+    get:
+      tags: [Funds]
+      summary: 'Detalle con miembros, totales y permisos'
+      operationId: getFund
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/FundDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    patch:
+      tags: [Funds]
+      summary: 'Edita nombre o descripción (gestores)'
+      operationId: updateFund
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundPatch' }
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Fund' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/funds/{fundId}/archive:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/FundId'
+    post:
+      tags: [Funds]
+      summary: 'Archiva un fondo con saldo cero'
+      operationId: archiveFund
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Fund' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/funds/{fundId}/members:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/FundId'
+    post:
+      tags: [Funds]
+      summary: 'Agrega un miembro del grupo al fondo'
+      operationId: addFundMember
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundMemberInput' }
+      responses:
+        '201':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/funds/{fundId}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/FundId'
+      - $ref: '#/components/parameters/MemberId'
+    patch:
+      tags: [Funds]
+      summary: 'Cambia el rol de un miembro del fondo'
+      operationId: updateFundMember
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [role]
+              properties:
+                role:
+                  enum: [MANAGER, MEMBER]
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Funds]
+      summary: 'Retira un miembro; siempre queda un gestor'
+      operationId: removeFundMember
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/funds/{fundId}/movements:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/FundId'
+    get:
+      tags: [Funds]
+      summary: 'Movimientos inmutables paginados por cursor'
+      operationId: listFundMovements
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/FundMovement' }
+                  meta:
+                    type: object
+                    properties:
+                      nextCursor:
+                        type: [string, 'null']
+                        format: uuid
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Funds]
+      summary: 'Registra aporte, retiro o ajuste; nunca deja saldo negativo'
+      operationId: createFundMovement
+      description: 'CONTRIBUTION: cualquier miembro del fondo. WITHDRAWAL y ADJUSTMENT: gestores del fondo o propietario/administrador del grupo. Serializable con bloqueo de fila; 409 INSUFFICIENT_FUNDS si el saldo quedaría negativo. Una repetición con la misma llave devuelve 200 y meta.idempotencyReplayed=true.'
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundMovementInput' }
+      responses:
+        '201':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [movement, balanceCents]
+                    properties:
+                      movement: { $ref: '#/components/schemas/FundMovement' }
+                      balanceCents:
+                        type: integer
+                  meta:
+                    type: object
+                    properties:
+                      idempotencyReplayed:
+                        type: boolean
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/budgets:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Budgets]
+      summary: 'Presupuestos con progreso del periodo actual'
+      operationId: listBudgets
+      parameters:
+        - name: at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: 'Fecha de referencia para el periodo actual; por defecto ahora.'
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Budgets]
+      summary: 'Crea un presupuesto (propietario o administrador)'
+      operationId: createBudget
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetInput' }
+      responses:
+        '201':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/budgets/{budgetId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/BudgetId'
+    get:
+      tags: [Budgets]
+      summary: 'Detalle con historial de los últimos 6 periodos'
+      operationId: getBudget
+      parameters:
+        - name: at
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: 'Fecha de referencia para el periodo actual; por defecto ahora.'
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/BudgetDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    patch:
+      tags: [Budgets]
+      summary: 'Edita un presupuesto'
+      operationId: updateBudget
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetPatch' }
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Budget' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Budgets]
+      summary: 'Elimina un presupuesto'
+      operationId: deleteBudget
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents:
+    get:
+      tags: [Documents]
+      summary: 'Documentos accesibles (propios, concedidos o del grupo)'
+      operationId: listDocuments
+      parameters:
+        - name: groupId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: eventId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: expenseId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: settlementId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Document' }
+                  meta:
+                    type: object
+                    properties:
+                      nextCursor:
+                        type: [string, 'null']
+                        format: uuid
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Documents]
+      summary: 'Sube un archivo binario (PDF, JPEG, PNG o WebP)'
+      operationId: uploadDocument
+      description: 'El Content-Type debe ser application/pdf, image/jpeg, image/png o image/webp y coincidir con la firma binaria (415/422 CONTENT_MISMATCH). Tamaño máximo MAX_UPLOAD_BYTES. La clave de almacenamiento nunca se expone.'
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+        - name: groupId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: eventId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: expenseId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: settlementId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              contentMediaType: application/octet-stream
+      responses:
+        '201':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Document' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/{documentId}:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    get:
+      tags: [Documents]
+      summary: 'Metadatos de un documento'
+      operationId: getDocument
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Document' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    patch:
+      tags: [Documents]
+      summary: 'Renombra o cambia asociaciones (acceso EDIT)'
+      operationId: updateDocument
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentPatch' }
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Document' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Documents]
+      summary: 'Elimina el documento y su archivo (acceso MANAGE)'
+      operationId: deleteDocument
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/{documentId}/download-url:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    post:
+      tags: [Documents]
+      summary: 'Emite una URL firmada de corta duración'
+      operationId: createDocumentDownloadUrl
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [url, expiresAt]
+                    properties:
+                      url:
+                        type: string
+                        format: uri
+                      expiresAt:
+                        type: string
+                        format: date-time
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/documents/{documentId}/grants:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    get:
+      tags: [Documents]
+      summary: 'Permisos explícitos del documento (acceso MANAGE)'
+      operationId: listDocumentGrants
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/DocumentGrant' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/{documentId}/grants/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+      - $ref: '#/components/parameters/UserId'
+    put:
+      tags: [Documents]
+      summary: 'Concede o cambia acceso a un miembro del grupo'
+      operationId: putDocumentGrant
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [access]
+              properties:
+                access:
+                  enum: [VIEW, EDIT, MANAGE]
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/DocumentGrant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Documents]
+      summary: 'Retira un permiso explícito'
+      operationId: deleteDocumentGrant
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/{documentId}/access-logs:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    get:
+      tags: [Documents]
+      summary: 'Bitácora de accesos (acceso MANAGE)'
+      operationId: listDocumentAccessLogs
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, action, createdAt, user]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        action:
+                          type: string
+                        createdAt:
+                          type: string
+                          format: date-time
+                        user:
+                          type: [object, 'null']
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            displayName:
+                              type: string
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/storage/local/{token}:
+    get:
+      tags: [Documents]
+      summary: 'Descarga mediante URL firmada del almacenamiento local'
+      operationId: downloadSignedDocument
+      description: 'El token es HMAC-SHA256 con caducidad; no requiere cookie para poder abrirse en otra pestaña.'
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      security: []
+      responses:
+        '200':
+          description: 'Archivo con Content-Disposition attachment, nosniff y CSP sandbox'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                contentMediaType: application/octet-stream
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/ocr/jobs:
+    get:
+      tags: [OCR]
+      summary: 'Trabajos OCR propios'
+      operationId: listOcrJobs
+      parameters:
+        - name: documentId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/OcrJob' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [OCR]
+      summary: 'Encola la lectura de un comprobante'
+      operationId: createOcrJob
+      description: 'Requiere acceso de lectura al documento (PDF o imagen). 503 OCR_PROVIDER_DISABLED si no hay proveedor configurado. OCR_PROVIDER=local solo existe en desarrollo/pruebas y la respuesta marca provider=local. El OCR solo propone datos; nunca modifica gastos.'
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [documentId]
+              properties:
+                documentId:
+                  type: string
+                  format: uuid
+      responses:
+        '202':
+          description: 'Aceptado; el procesamiento es asíncrono'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/OcrJob' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/ocr/jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [OCR]
+      summary: 'Estado del trabajo; proposal solo cuando SUCCEEDED'
+      operationId: getOcrJob
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/OcrJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/ocr/jobs/{jobId}/retry:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [OCR]
+      summary: 'Reintenta un trabajo fallido dentro del máximo de intentos'
+      operationId: retryOcrJob
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '202':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/OcrJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/ocr/jobs/{jobId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [OCR]
+      summary: 'Confirma la propuesta vinculando el documento a un gasto revisado'
+      operationId: confirmOcrJob
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expenseId]
+              properties:
+                expenseId:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/OcrJob' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/cabudas/summary:
+    get:
+      tags: [Cabudas]
+      summary: 'Deudas consolidadas del usuario por moneda, grupo y persona'
+      operationId: getCabudasSummary
+      description: 'No mezcla monedas. openEvents son estimaciones de eventos sin liquidar y no son deuda formal.'
+      parameters:
+        - name: groupId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: currency
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^[A-Z]{3}$'
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/CabudasSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/cabudas/history:
+    get:
+      tags: [Cabudas]
+      summary: 'Historial de transferencias del usuario'
+      operationId: getCabudasHistory
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            enum: [PENDING, PAID, DISPUTED, CANCELLED, ALL]
+            default: ALL
+        - name: direction
+          in: query
+          required: false
+          schema:
+            enum: [PAY, RECEIVE, ALL]
+            default: ALL
+        - name: groupId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CabudasTransfer' }
+                  meta:
+                    type: object
+                    properties:
+                      nextCursor:
+                        type: [string, 'null']
+                        format: uuid
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/statistics/summary:
+    get:
+      tags: [Statistics]
+      summary: 'Agregados de gasto sobre datos autorizados'
+      operationId: getStatisticsSummary
+      description: 'Rango máximo 366 días; por defecto los últimos 90. Solo grupos donde el usuario es miembro.'
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: groupId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: eventId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: currency
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^[A-Z]{3}$'
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/StatisticsSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/statistics/summary/export:
+    get:
+      tags: [Statistics]
+      summary: 'Exporta el mismo resumen autorizado en CSV'
+      operationId: exportStatisticsSummary
+      description: 'Usa los mismos filtros y pertenencia que el resumen JSON. El archivo limita filas, escapa RFC 4180 y neutraliza fórmulas de hojas de cálculo.'
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: groupId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: eventId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: currency
+          in: query
+          required: false
+          schema: { type: string, pattern: '^[A-Z]{3}$' }
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'CSV con Content-Disposition attachment y moneda explícita por fila'
+          content:
+            text/csv:
+              schema:
+                type: string
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: 'Avisos del usuario'
+      operationId: listNotifications
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            enum: [UNREAD, READ, ARCHIVED, ACTIVE]
+            default: ACTIVE
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Notification' }
+                  meta:
+                    type: object
+                    properties:
+                      nextCursor:
+                        type: [string, 'null']
+                        format: uuid
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: 'Contador de no leídos'
+      operationId: getUnreadNotificationCount
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [unread]
+                    properties:
+                      unread:
+                        type: integer
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: 'Marca todos como leídos'
+      operationId: readAllNotifications
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [updated]
+                    properties:
+                      updated:
+                        type: integer
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/notifications/preferences:
+    get:
+      tags: [Notifications]
+      summary: 'Preferencias por tipo y canales disponibles'
+      operationId: getNotificationPreferences
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferencesEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    put:
+      tags: [Notifications]
+      summary: 'Actualiza preferencias por tipo'
+      operationId: putNotificationPreferences
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPreferencesInput' }
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferencesEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/notifications/push-config:
+    get:
+      tags: [Notifications]
+      summary: 'Obtiene la disponibilidad y la clave pública de Web Push'
+      operationId: getPushConfig
+      description: 'Nunca devuelve VAPID_PRIVATE_KEY. Cuando PUSH_PROVIDER=disabled devuelve enabled=false y publicKey=null.'
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Configuración pública de push'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: object
+                    required: [enabled, publicKey]
+                    properties:
+                      enabled: { type: boolean }
+                      publicKey: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/notifications/push-subscriptions:
+    post:
+      tags: [Notifications]
+      summary: 'Registra una suscripción Web Push (HTTPS)'
+      operationId: createPushSubscription
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PushSubscriptionInput' }
+      responses:
+        '201':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      tags: [Notifications]
+      summary: 'Elimina una suscripción Web Push'
+      operationId: deletePushSubscription
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [endpoint]
+              properties:
+                endpoint:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+                  pattern: '^https://'
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/notifications/{notificationId}/read:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    post:
+      tags: [Notifications]
+      summary: 'Marca un aviso como leído'
+      operationId: readNotification
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Notification' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/notifications/{notificationId}/archive:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    post:
+      tags: [Notifications]
+      summary: 'Archiva un aviso'
+      operationId: archiveNotification
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/Notification' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/achievements:
+    get:
+      tags: [Achievements]
+      summary: 'Catálogo con progreso; evalúa y desbloquea de forma idempotente'
+      operationId: listAchievements
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Achievement' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/achievements/history:
+    get:
+      tags: [Achievements]
+      summary: 'Logros obtenidos'
+      operationId: listAchievementHistory
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, name, description, awardedAt]
+                      properties:
+                        code:
+                          type: string
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        awardedAt:
+                          type: string
+                          format: date-time
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/privacy/requests:
+    get:
+      tags: [Privacy]
+      summary: 'Solicitudes ARCO-POL propias'
+      operationId: listPrivacyRequests
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/PrivacyRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Privacy]
+      summary: 'Crea una solicitud de acceso, rectificación, supresión, oposición o portabilidad'
+      operationId: createPrivacyRequest
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrivacyRequestInput' }
+      responses:
+        '201':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/PrivacyRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/privacy/requests/{requestId}:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    get:
+      tags: [Privacy]
+      summary: 'Detalle de una solicitud propia'
+      operationId: getPrivacyRequest
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/PrivacyRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/privacy/requests/{requestId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    post:
+      tags: [Privacy]
+      summary: 'Confirma la solicitud; la supresión exige contraseña'
+      operationId: confirmPrivacyRequest
+      description: 'ACCESS y PORTABILITY quedan COMPLETED con exportación temporal. ERASURE anonimiza la cuenta, transfiere la propiedad de grupos compartidos, elimina credenciales, sesiones y documentos propios y limpia cookies. RECTIFICATION y OBJECTION pasan a IN_PROGRESS para atención manual.'
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: []
+              properties:
+                password:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/PrivacyRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/privacy/requests/{requestId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    post:
+      tags: [Privacy]
+      summary: 'Cancela una solicitud pendiente'
+      operationId: cancelPrivacyRequest
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/PrivacyRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/privacy/requests/{requestId}/export:
+    parameters:
+      - $ref: '#/components/parameters/RequestId'
+    get:
+      tags: [Privacy]
+      summary: 'Descarga la exportación JSON de datos propios'
+      operationId: exportPrivacyRequest
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    description: 'Perfil, membresías, eventos, gastos con su parte, transferencias, fondos, documentos (metadatos), avisos, solicitudes y actividad propia. Sin secretos ni datos personales de terceros.'
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 components:
   securitySchemes:
     sessionCookie:
@@ -403,6 +2527,77 @@ components:
       required: true
       description: Se reproduce durante 24 horas; una llave vencida puede reclamarse de nuevo atómicamente.
       schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[!-~]+$' }
+    InvitationId:
+      name: invitationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FundId:
+      name: fundId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      description: 'Identificador del miembro del fondo.'
+      schema:
+        type: string
+        format: uuid
+    BudgetId:
+      name: budgetId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DocumentId:
+      name: documentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     HealthSuccess:
       {
@@ -543,6 +2738,16 @@ components:
         description: Límite de solicitudes excedido,
         content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
       }
+    PayloadTooLarge:
+      description: 'Archivo o cuerpo demasiado grande'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    UnsupportedMediaType:
+      description: 'Tipo de contenido no permitido'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     ServiceUnavailable:
       {
         description: PostgreSQL no disponible,
@@ -582,12 +2787,14 @@ components:
     User:
       type: object
       additionalProperties: false
-      required: [id, email, displayName, avatarUrl]
+      required: [id, email, displayName, avatarUrl, locale, emailVerified]
       properties:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
         displayName: { type: string }
         avatarUrl: { type: [string, 'null'], format: uri }
+        locale: { type: string }
+        emailVerified: { type: boolean }
     AuthEnvelope:
       type: object
       required: [success, data]
@@ -717,9 +2924,15 @@ components:
         success: { const: true }
         data:
           type: object
-          required: [invitation, token]
+          required: [invitation, token, delivery]
           properties:
-            token: { type: string }
+            token:
+              {
+                type: string,
+                description: Se muestra una sola vez para compartir el enlace manualmente.,
+              }
+            delivery:
+              { enum: [email, manual], description: manual cuando no hay proveedor de correo real. }
             invitation:
               {
                 type: object,
@@ -1128,3 +3341,1355 @@ components:
                 paidAt: { type: string, format: date-time },
               },
           }
+    AcceptedEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          const: true
+        data:
+          type: object
+          required: [accepted]
+          properties:
+            accepted:
+              const: true
+    EmailInput:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+    TokenInput:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token:
+          type: string
+          minLength: 32
+          maxLength: 256
+          pattern: '^[A-Za-z0-9_-]+$'
+    PasswordResetInput:
+      type: object
+      additionalProperties: false
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          minLength: 32
+          maxLength: 256
+          pattern: '^[A-Za-z0-9_-]+$'
+        password:
+          type: string
+          minLength: 12
+          maxLength: 128
+    ProfilePatch:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 120
+        locale:
+          enum: [es, en]
+      minProperties: 1
+    UserEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          const: true
+        data:
+          type: object
+          additionalProperties: false
+          required: [user]
+          properties:
+            user: { $ref: '#/components/schemas/User' }
+    Invitation:
+      type: object
+      required:
+        [
+          id,
+          groupId,
+          email,
+          role,
+          status,
+          expiresAt,
+          createdAt,
+          acceptedAt,
+          revokedAt,
+          lastSentAt,
+          sendCount,
+          invitedBy,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          enum: [ADMIN, MEMBER]
+        status:
+          enum: [PENDING, ACCEPTED, REVOKED, EXPIRED]
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: [string, 'null']
+          format: date-time
+        revokedAt:
+          type: [string, 'null']
+          format: date-time
+        lastSentAt:
+          type: [string, 'null']
+          format: date-time
+        sendCount:
+          type: integer
+        invitedBy:
+          type: object
+          required: [id, displayName]
+          properties:
+            id:
+              type: string
+              format: uuid
+            displayName:
+              type: string
+    InvitationPreview:
+      type: object
+      required: [groupName, invitedBy, role, status, expiresAt, emailMatches]
+      properties:
+        groupName:
+          type: string
+        invitedBy:
+          type: string
+        role:
+          enum: [ADMIN, MEMBER]
+        status:
+          enum: [PENDING, ACCEPTED, REVOKED, EXPIRED]
+        expiresAt:
+          type: string
+          format: date-time
+        emailMatches:
+          type: boolean
+    Category:
+      type: object
+      required: [id, groupId, name, color]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          type: [string, 'null']
+    CategoryInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        color:
+          type: string
+          pattern: '^#[0-9a-fA-F]{6}$'
+    Fund:
+      type: object
+      required:
+        [
+          id,
+          groupId,
+          name,
+          description,
+          currency,
+          archivedAt,
+          createdAt,
+          updatedAt,
+          balanceCents,
+          myRole,
+          canManage,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        currency:
+          type: string
+        archivedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        balanceCents:
+          type: integer
+        myRole:
+          enum: [MANAGER, MEMBER, null]
+        canManage:
+          type: boolean
+        memberCount:
+          type: integer
+        movementCount:
+          type: integer
+    FundDetail:
+      type: object
+      required:
+        [
+          id,
+          groupId,
+          name,
+          description,
+          currency,
+          archivedAt,
+          createdAt,
+          updatedAt,
+          balanceCents,
+          myRole,
+          canManage,
+          canContribute,
+          totals,
+          members,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        currency:
+          type: string
+        archivedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        balanceCents:
+          type: integer
+        myRole:
+          enum: [MANAGER, MEMBER, null]
+        canManage:
+          type: boolean
+        canContribute:
+          type: boolean
+        totals:
+          type: object
+          additionalProperties:
+            type: object
+            required: [totalCents, count]
+            properties:
+              totalCents:
+                type: integer
+              count:
+                type: integer
+        members:
+          type: array
+          items:
+            type: object
+            required: [id, role, joinedAt, groupMemberId, user]
+            properties:
+              id:
+                type: string
+                format: uuid
+              role:
+                enum: [MANAGER, MEMBER]
+              joinedAt:
+                type: string
+                format: date-time
+              groupMemberId:
+                type: string
+                format: uuid
+              user:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  displayName:
+                    type: string
+                  avatarUrl:
+                    type: [string, 'null']
+    FundInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        memberIds:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+          description: 'Identificadores de miembros del grupo.'
+    FundPatch:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        description:
+          type: [string, 'null']
+          maxLength: 500
+      minProperties: 1
+    FundMemberInput:
+      type: object
+      additionalProperties: false
+      required: [groupMemberId]
+      properties:
+        groupMemberId:
+          type: string
+          format: uuid
+        role:
+          enum: [MANAGER, MEMBER]
+          default: MEMBER
+    FundMovement:
+      type: object
+      required: [id, type, amountCents, description, createdAt, createdBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          enum: [CONTRIBUTION, WITHDRAWAL, ADJUSTMENT]
+        amountCents:
+          type: integer
+        description:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: [object, 'null']
+          properties:
+            id:
+              type: string
+              format: uuid
+            displayName:
+              type: string
+    FundMovementInput:
+      type: object
+      additionalProperties: false
+      required: [type, amountCents]
+      properties:
+        type:
+          enum: [CONTRIBUTION, WITHDRAWAL, ADJUSTMENT]
+        amountCents:
+          type: integer
+          minimum: -2147483647
+          maximum: 2147483647
+          description: 'Positivo para aportes y retiros; ADJUSTMENT admite signo y no puede ser cero.'
+        description:
+          type: string
+          maxLength: 500
+          description: 'Obligatoria (mín. 3) para WITHDRAWAL y ADJUSTMENT.'
+    Budget:
+      type: object
+      required:
+        [
+          id,
+          groupId,
+          name,
+          amountCents,
+          currency,
+          period,
+          startsAt,
+          endsAt,
+          alertThresholdPercent,
+          createdAt,
+          updatedAt,
+          category,
+          current,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        amountCents:
+          type: integer
+        currency:
+          type: string
+        period:
+          enum: [WEEKLY, MONTHLY, YEARLY, CUSTOM]
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+        alertThresholdPercent:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        category:
+          type: [object, 'null']
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            color:
+              type: [string, 'null']
+        current:
+          type: object
+          required:
+            [
+              periodStart,
+              periodEnd,
+              periodState,
+              spentCents,
+              expenseCount,
+              remainingCents,
+              overspentCents,
+              progressPercent,
+              alert,
+            ]
+          properties:
+            periodStart:
+              type: string
+              format: date-time
+            periodEnd:
+              type: string
+              format: date-time
+            periodState:
+              enum: [UPCOMING, ACTIVE, ENDED]
+            spentCents:
+              type: integer
+            expenseCount:
+              type: integer
+            remainingCents:
+              type: integer
+            overspentCents:
+              type: integer
+            progressPercent:
+              type: number
+            alert:
+              enum: [OK, WARNING, EXCEEDED]
+    BudgetDetail:
+      type: object
+      required:
+        [
+          id,
+          groupId,
+          name,
+          amountCents,
+          currency,
+          period,
+          startsAt,
+          endsAt,
+          alertThresholdPercent,
+          createdAt,
+          updatedAt,
+          category,
+          current,
+          history,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        amountCents:
+          type: integer
+        currency:
+          type: string
+        period:
+          enum: [WEEKLY, MONTHLY, YEARLY, CUSTOM]
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+        alertThresholdPercent:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        category:
+          type: [object, 'null']
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            color:
+              type: [string, 'null']
+        current:
+          type: object
+          required:
+            [
+              periodStart,
+              periodEnd,
+              periodState,
+              spentCents,
+              expenseCount,
+              remainingCents,
+              overspentCents,
+              progressPercent,
+              alert,
+            ]
+          properties:
+            periodStart:
+              type: string
+              format: date-time
+            periodEnd:
+              type: string
+              format: date-time
+            periodState:
+              enum: [UPCOMING, ACTIVE, ENDED]
+            spentCents:
+              type: integer
+            expenseCount:
+              type: integer
+            remainingCents:
+              type: integer
+            overspentCents:
+              type: integer
+            progressPercent:
+              type: number
+            alert:
+              enum: [OK, WARNING, EXCEEDED]
+        history:
+          type: array
+          items:
+            type: object
+            required: [periodStart, periodEnd, spentCents, expenseCount]
+            properties:
+              periodStart:
+                type: string
+                format: date-time
+              periodEnd:
+                type: string
+                format: date-time
+              spentCents:
+                type: integer
+              expenseCount:
+                type: integer
+    BudgetInput:
+      type: object
+      additionalProperties: false
+      required: [name, amountCents, period, startsAt]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        amountCents:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        period:
+          enum: [WEEKLY, MONTHLY, YEARLY, CUSTOM]
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+          description: 'Obligatoria para CUSTOM y posterior a startsAt.'
+        categoryId:
+          type: [string, 'null']
+          format: uuid
+        alertThresholdPercent:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 80
+    BudgetPatch:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+        amountCents:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+        categoryId:
+          type: [string, 'null']
+          format: uuid
+        alertThresholdPercent:
+          type: integer
+          minimum: 1
+          maximum: 100
+      minProperties: 1
+    Document:
+      type: object
+      required:
+        [
+          id,
+          name,
+          mimeType,
+          sizeBytes,
+          groupId,
+          eventId,
+          expenseId,
+          settlementId,
+          createdAt,
+          updatedAt,
+          owner,
+          access,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        mimeType:
+          enum: [application/pdf, image/jpeg, image/png, image/webp]
+        sizeBytes:
+          type: [integer, 'null']
+        groupId:
+          type: [string, 'null']
+          format: uuid
+        eventId:
+          type: [string, 'null']
+          format: uuid
+        expenseId:
+          type: [string, 'null']
+          format: uuid
+        settlementId:
+          type: [string, 'null']
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        owner:
+          type: object
+          required: [id, displayName]
+          properties:
+            id:
+              type: string
+              format: uuid
+            displayName:
+              type: string
+        access:
+          enum: [VIEW, EDIT, MANAGE]
+    DocumentPatch:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        eventId:
+          type: [string, 'null']
+          format: uuid
+        expenseId:
+          type: [string, 'null']
+          format: uuid
+        settlementId:
+          type: [string, 'null']
+          format: uuid
+      minProperties: 1
+    DocumentGrant:
+      type: object
+      required: [userId, displayName, access, createdAt]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        access:
+          enum: [VIEW, EDIT, MANAGE]
+        createdAt:
+          type: string
+          format: date-time
+    OcrProposal:
+      type: object
+      required: [items]
+      properties:
+        merchant:
+          type: [string, 'null']
+        totalCents:
+          type: [integer, 'null']
+        currency:
+          type: [string, 'null']
+        occurredAt:
+          type: [string, 'null']
+          format: date-time
+        items:
+          type: array
+          items:
+            type: object
+            required: [description, amountCents]
+            properties:
+              description:
+                type: string
+              amountCents:
+                type: integer
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+    OcrJob:
+      type: object
+      required:
+        [
+          id,
+          documentId,
+          status,
+          attempts,
+          errorCode,
+          createdAt,
+          startedAt,
+          finishedAt,
+          confirmedAt,
+          confirmedExpenseId,
+          proposal,
+          maxAttempts,
+          canRetry,
+          provider,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        documentId:
+          type: [string, 'null']
+          format: uuid
+        status:
+          enum: [PENDING, PROCESSING, SUCCEEDED, FAILED]
+        attempts:
+          type: integer
+        errorCode:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: [string, 'null']
+          format: date-time
+        finishedAt:
+          type: [string, 'null']
+          format: date-time
+        confirmedAt:
+          type: [string, 'null']
+          format: date-time
+        confirmedExpenseId:
+          type: [string, 'null']
+          format: uuid
+        proposal:
+          oneOf:
+            - $ref: '#/components/schemas/OcrProposal'
+            - type: 'null'
+        maxAttempts:
+          type: integer
+        canRetry:
+          type: boolean
+        provider:
+          type: string
+    CabudasTransfer:
+      type: object
+      required:
+        [
+          transferId,
+          settlementId,
+          groupId,
+          groupName,
+          eventId,
+          eventName,
+          direction,
+          counterparty,
+          amountCents,
+          currency,
+          status,
+          paidAt,
+          createdAt,
+        ]
+      properties:
+        transferId:
+          type: string
+          format: uuid
+        settlementId:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        groupName:
+          type: string
+        eventId:
+          type: string
+          format: uuid
+        eventName:
+          type: string
+        direction:
+          enum: [PAY, RECEIVE]
+        counterparty:
+          type: object
+          required: [userId, displayName, isGuest]
+          properties:
+            userId:
+              type: [string, 'null']
+              format: uuid
+            displayName:
+              type: string
+            isGuest:
+              type: boolean
+        amountCents:
+          type: integer
+        currency:
+          type: string
+        status:
+          enum: [PENDING, PAID, DISPUTED, CANCELLED]
+        paidAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    CabudasSummary:
+      type: object
+      required: [totals, groups, people, simplifiedTransfers, pendingTransfers, openEvents]
+      properties:
+        totals:
+          type: array
+          items:
+            type: object
+            required: [currency, owedToMeCents, iOweCents, netCents]
+            properties:
+              currency:
+                type: string
+              owedToMeCents:
+                type: integer
+              iOweCents:
+                type: integer
+              netCents:
+                type: integer
+        groups:
+          type: array
+          items:
+            type: object
+            required: [groupId, groupName, currency, owedToMeCents, iOweCents, netCents]
+            properties:
+              groupId:
+                type: string
+                format: uuid
+              groupName:
+                type: string
+              currency:
+                type: string
+              owedToMeCents:
+                type: integer
+              iOweCents:
+                type: integer
+              netCents:
+                type: integer
+        people:
+          type: array
+          items:
+            type: object
+            required: [counterparty, groupId, currency, netCents]
+            properties:
+              counterparty:
+                type: object
+                required: [userId, displayName, isGuest]
+                properties:
+                  userId:
+                    type: [string, 'null']
+                    format: uuid
+                  displayName:
+                    type: string
+                  isGuest:
+                    type: boolean
+              groupId:
+                type: [string, 'null']
+                format: uuid
+              currency:
+                type: string
+              netCents:
+                type: integer
+                description: 'Positivo: te deben; negativo: debes.'
+        simplifiedTransfers:
+          type: array
+          items:
+            type: object
+            required: [direction, counterparty, groupId, currency, amountCents]
+            properties:
+              direction:
+                enum: [PAY, RECEIVE]
+              counterparty:
+                type: object
+                required: [userId, displayName, isGuest]
+                properties:
+                  userId:
+                    type: [string, 'null']
+                    format: uuid
+                  displayName:
+                    type: string
+                  isGuest:
+                    type: boolean
+              groupId:
+                type: [string, 'null']
+                format: uuid
+              currency:
+                type: string
+              amountCents:
+                type: integer
+        pendingTransfers:
+          type: array
+          items: { $ref: '#/components/schemas/CabudasTransfer' }
+        openEvents:
+          type: array
+          items:
+            type: object
+            required: [eventId, eventName, groupId, groupName, currency, myNetCents]
+            properties:
+              eventId:
+                type: string
+                format: uuid
+              eventName:
+                type: string
+              groupId:
+                type: string
+                format: uuid
+              groupName:
+                type: string
+              currency:
+                type: string
+              myNetCents:
+                type: integer
+    StatisticsSummary:
+      type: object
+      required:
+        [
+          range,
+          currency,
+          availableCurrencies,
+          granularity,
+          totals,
+          byCategory,
+          byGroup,
+          byEvent,
+          byPerson,
+          trend,
+          budgets,
+        ]
+      properties:
+        range:
+          type: object
+          required: [from, to]
+          properties:
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+        currency:
+          type: [string, 'null']
+        availableCurrencies:
+          type: array
+          items:
+            type: string
+        granularity:
+          enum: [week, month]
+        totals:
+          type: object
+          required: [spentCents, expenseCount, myShareCents, myPaidCents, averageExpenseCents]
+          properties:
+            spentCents:
+              type: integer
+            expenseCount:
+              type: integer
+            myShareCents:
+              type: integer
+            myPaidCents:
+              type: integer
+            averageExpenseCents:
+              type: integer
+        byCategory:
+          type: array
+          items:
+            type: object
+            required: [categoryId, name, color, totalCents, count]
+            properties:
+              categoryId:
+                type: [string, 'null']
+                format: uuid
+              name:
+                type: string
+              color:
+                type: [string, 'null']
+              totalCents:
+                type: integer
+              count:
+                type: integer
+        byGroup:
+          type: array
+          items:
+            type: object
+            required: [groupId, name, totalCents, count]
+            properties:
+              groupId:
+                type: string
+                format: uuid
+              name:
+                type: string
+              totalCents:
+                type: integer
+              count:
+                type: integer
+        byEvent:
+          type: array
+          items:
+            type: object
+            required: [eventId, name, groupId, totalCents, count]
+            properties:
+              eventId:
+                type: string
+                format: uuid
+              name:
+                type: string
+              groupId:
+                type: string
+                format: uuid
+              totalCents:
+                type: integer
+              count:
+                type: integer
+        byPerson:
+          type: array
+          items:
+            type: object
+            required: [userId, displayName, paidCents, shareCents]
+            properties:
+              userId:
+                type: [string, 'null']
+                format: uuid
+              displayName:
+                type: string
+              paidCents:
+                type: integer
+              shareCents:
+                type: integer
+        trend:
+          type: array
+          items:
+            type: object
+            required: [period, totalCents, myShareCents]
+            properties:
+              period:
+                type: string
+              totalCents:
+                type: integer
+              myShareCents:
+                type: integer
+        budgets:
+          type: array
+          items:
+            type: object
+            required:
+              [
+                budgetId,
+                name,
+                groupId,
+                amountCents,
+                spentCents,
+                progressPercent,
+                alert,
+                periodStart,
+                periodEnd,
+              ]
+            properties:
+              budgetId:
+                type: string
+                format: uuid
+              name:
+                type: string
+              groupId:
+                type: string
+                format: uuid
+              amountCents:
+                type: integer
+              spentCents:
+                type: integer
+              progressPercent:
+                type: number
+              alert:
+                enum: [OK, WARNING, EXCEEDED]
+              periodStart:
+                type: string
+                format: date-time
+              periodEnd:
+                type: string
+                format: date-time
+    Notification:
+      type: object
+      required: [id, type, title, body, data, status, createdAt, readAt, archivedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          enum:
+            [
+              invitation.received,
+              invitation.accepted,
+              settlement.created,
+              transfer.paid,
+              budget.threshold,
+              fund.movement,
+              ocr.finished,
+              privacy.updated,
+              achievement.unlocked,
+            ]
+        title:
+          type: string
+        body:
+          type: string
+        data:
+          type: [object, 'null']
+        status:
+          enum: [UNREAD, READ, ARCHIVED]
+        createdAt:
+          type: string
+          format: date-time
+        readAt:
+          type: [string, 'null']
+          format: date-time
+        archivedAt:
+          type: [string, 'null']
+          format: date-time
+    NotificationPreference:
+      type: object
+      additionalProperties: false
+      required: [type, inApp, email, push]
+      properties:
+        type:
+          enum:
+            [
+              invitation.received,
+              invitation.accepted,
+              settlement.created,
+              transfer.paid,
+              budget.threshold,
+              fund.movement,
+              ocr.finished,
+              privacy.updated,
+              achievement.unlocked,
+            ]
+        inApp:
+          type: boolean
+        email:
+          type: boolean
+        push:
+          type: boolean
+    NotificationPreferencesInput:
+      type: object
+      additionalProperties: false
+      required: [preferences]
+      properties:
+        preferences:
+          type: array
+          minItems: 1
+          maxItems: 9
+          items: { $ref: '#/components/schemas/NotificationPreference' }
+    NotificationPreferencesEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          const: true
+        data:
+          type: object
+          required: [preferences, channels]
+          properties:
+            preferences:
+              type: array
+              items: { $ref: '#/components/schemas/NotificationPreference' }
+            channels:
+              type: object
+              required: [inApp, email, push]
+              properties:
+                inApp:
+                  type: boolean
+                email:
+                  type: boolean
+                push:
+                  type: boolean
+    PushSubscriptionInput:
+      type: object
+      additionalProperties: false
+      required: [endpoint, keys]
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+          pattern: '^https://'
+        keys:
+          type: object
+          additionalProperties: false
+          required: [p256dh, auth]
+          properties:
+            p256dh:
+              type: string
+              minLength: 16
+              maxLength: 512
+              pattern: '^[A-Za-z0-9_-]+$'
+            auth:
+              type: string
+              minLength: 8
+              maxLength: 512
+              pattern: '^[A-Za-z0-9_-]+$'
+    Achievement:
+      type: object
+      required: [code, name, description, category, target, progress, status, awardedAt]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        target:
+          type: integer
+        progress:
+          type: integer
+        status:
+          enum: [LOCKED, IN_PROGRESS, UNLOCKED]
+        awardedAt:
+          type: [string, 'null']
+          format: date-time
+    PrivacyRequest:
+      type: object
+      required:
+        [
+          id,
+          type,
+          status,
+          reason,
+          createdAt,
+          updatedAt,
+          confirmedAt,
+          cancelledAt,
+          completedAt,
+          exportExpiresAt,
+          resultSummary,
+          exportAvailable,
+          requiresPassword,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          enum: [ACCESS, RECTIFICATION, ERASURE, OBJECTION, PORTABILITY]
+        status:
+          enum: [PENDING, IN_PROGRESS, COMPLETED, REJECTED, CANCELLED]
+        reason:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          type: [string, 'null']
+          format: date-time
+        cancelledAt:
+          type: [string, 'null']
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+        exportExpiresAt:
+          type: [string, 'null']
+          format: date-time
+        resultSummary:
+          type: [object, 'null']
+        exportAvailable:
+          type: boolean
+        requiresPassword:
+          type: boolean
+    PrivacyRequestInput:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          enum: [ACCESS, RECTIFICATION, ERASURE, OBJECTION, PORTABILITY]
+        reason:
+          type: string
+          maxLength: 1000

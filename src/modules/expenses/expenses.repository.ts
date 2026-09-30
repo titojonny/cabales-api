@@ -8,6 +8,7 @@ export interface PreparedExpense {
   eventId: string;
   title: string;
   notes?: string;
+  categoryId?: string;
   totalCents: number;
   currency: string;
   splitMode: SplitMode;
@@ -33,6 +34,7 @@ const expenseDetail = {
   splitMode: true,
   occurredAt: true,
   createdAt: true,
+  categoryId: true,
   participants: {
     select: {
       id: true,
@@ -94,6 +96,7 @@ export class ExpensesRepository {
         splitMode: true,
         occurredAt: true,
         createdAt: true,
+        categoryId: true,
         _count: { select: { participants: true, items: true } },
       },
       orderBy: [{ occurredAt: 'desc' }, { id: 'asc' }],
@@ -171,6 +174,7 @@ export class ExpensesRepository {
                 createdById: input.userId,
                 title: input.expense.title,
                 ...(input.expense.notes ? { notes: input.expense.notes } : {}),
+                ...(input.expense.categoryId ? { categoryId: input.expense.categoryId } : {}),
                 totalCents: input.expense.totalCents,
                 currency: input.expense.currency,
                 splitMode: input.expense.splitMode,

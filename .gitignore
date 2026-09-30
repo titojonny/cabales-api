@@ -12,6 +12,9 @@ skills-lock.json
 
 # Volúmenes o volcados locales de PostgreSQL
 postgres-data/
+
+# Documentos subidos al almacenamiento local (STORAGE_LOCAL_DIR); son datos personales
+storage/
 *.sql.gz
 
 # Artefactos de compilación y cobertura

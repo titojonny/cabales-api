@@ -4,6 +4,7 @@ import { AppError, ensure } from '../../shared/errors.js';
 import { assertExactTotal } from '../../shared/money.js';
 import { calculateSettlement, type ParticipantBalance } from '../../shared/settlement.js';
 import type { GroupsService } from '../groups/groups.service.js';
+import type { DomainEvents } from '../../shared/events.js';
 import type { CreateSettlementInput } from './settlements.schema.js';
 import type { SettlementsRepository } from './settlements.repository.js';
 
@@ -12,6 +13,7 @@ export class SettlementsService {
   constructor(
     private readonly repository: SettlementsRepository,
     private readonly groups: GroupsService,
+    private readonly events?: DomainEvents,
   ) {}
 
   async create(
@@ -95,6 +97,18 @@ export class SettlementsService {
         'IDEMPOTENCY_CONFLICT',
         'La llave ya se uso con otra solicitud',
       );
+      if (!result.replayed) {
+        const settlementId = (result.data as { id?: string } | null)?.id;
+        if (settlementId) {
+          this.events?.emit({
+            type: 'settlement.created',
+            groupId,
+            settlementId,
+            eventId: input.eventId,
+            userId,
+          });
+        }
+      }
       return { data: result.data, replayed: result.replayed };
     } catch (error) {
       if (
@@ -178,6 +192,9 @@ export class SettlementsService {
       'TRANSFER_TERMINAL_STATUS',
       'La transferencia termino con un estado distinto de pagada',
     );
+    if (transfer.status === TransferStatus.PENDING) {
+      this.events?.emit({ type: 'transfer.paid', groupId, settlementId, transferId, userId });
+    }
     return updated;
   }
 }

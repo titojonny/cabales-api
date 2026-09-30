@@ -37,8 +37,13 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 
+# Proceso sin privilegios; solo el directorio de almacenamiento local es escribible.
+RUN mkdir -p /app/storage && chown node:node /app/storage
+USER node
+
 EXPOSE 3000
 
 # Las migraciones deben aplicarse como paso explícito del despliegue; el proceso web
-# no modifica el esquema de producción al iniciar.
+# no modifica el esquema de producción al iniciar. La retención se programa aparte con
+# `node dist/jobs/retention.js --scheduled` (cron del orquestador).
 CMD ["node", "dist/index.js"]

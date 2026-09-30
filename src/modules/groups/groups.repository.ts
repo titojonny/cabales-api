@@ -12,6 +12,21 @@ const groupView = {
   updatedAt: true,
 } as const;
 
+const invitationView = {
+  id: true,
+  groupId: true,
+  email: true,
+  role: true,
+  status: true,
+  expiresAt: true,
+  createdAt: true,
+  acceptedAt: true,
+  revokedAt: true,
+  lastSentAt: true,
+  sendCount: true,
+  invitedBy: { select: { id: true, displayName: true } },
+} as const;
+
 /** Persistencia de grupos, membresías e invitaciones. */
 export class GroupsRepository {
   constructor(private readonly db: Database) {}
@@ -117,6 +132,40 @@ export class GroupsRepository {
     );
   }
 
+  groupSummary(groupId: string) {
+    return this.db.group.findUnique({ where: { id: groupId }, select: { id: true, name: true } });
+  }
+
+  userDisplayName(userId: string) {
+    return this.db.user.findUnique({ where: { id: userId }, select: { displayName: true } });
+  }
+
+  isMemberEmail(groupId: string, email: string) {
+    return this.db.groupMember.findFirst({
+      where: { groupId, user: { email } },
+      select: { id: true },
+    });
+  }
+
+  /** Marca como EXPIRED las invitaciones pendientes vencidas del grupo antes de decidir. */
+  expireStale(groupId?: string) {
+    return this.db.groupInvitation.updateMany({
+      where: {
+        status: InvitationStatus.PENDING,
+        expiresAt: { lte: new Date() },
+        ...(groupId ? { groupId } : {}),
+      },
+      data: { status: InvitationStatus.EXPIRED },
+    });
+  }
+
+  findPendingByEmail(groupId: string, email: string) {
+    return this.db.groupInvitation.findFirst({
+      where: { groupId, email, status: InvitationStatus.PENDING, expiresAt: { gt: new Date() } },
+      select: { id: true },
+    });
+  }
+
   createInvitation(input: {
     groupId: string;
     invitedById: string;
@@ -124,22 +173,131 @@ export class GroupsRepository {
     role: GroupRole;
     tokenHash: string;
     expiresAt: Date;
+    requestId: string;
   }) {
-    return this.db.groupInvitation.create({
-      data: input,
-      select: { id: true, groupId: true, email: true, role: true, status: true, expiresAt: true },
+    const { requestId, ...data } = input;
+    return this.db.$transaction(async (tx) => {
+      const invitation = await tx.groupInvitation.create({
+        data: { ...data, lastSentAt: new Date() },
+        select: invitationView,
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: input.invitedById,
+          action: 'invitation.created',
+          entityType: 'GroupInvitation',
+          entityId: invitation.id,
+          requestId,
+          metadata: { groupId: input.groupId, role: input.role },
+        },
+      });
+      return invitation;
+    });
+  }
+
+  reopenExpired(invitationId: string) {
+    return this.db.groupInvitation.updateMany({
+      where: { id: invitationId, status: InvitationStatus.EXPIRED },
+      data: { status: InvitationStatus.PENDING },
+    });
+  }
+
+  listInvitations(groupId: string, status?: InvitationStatus) {
+    return this.db.groupInvitation.findMany({
+      where: { groupId, ...(status ? { status } : {}) },
+      select: invitationView,
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+  }
+
+  findInvitationInGroup(groupId: string, invitationId: string) {
+    return this.db.groupInvitation.findFirst({
+      where: { id: invitationId, groupId },
+      select: invitationView,
+    });
+  }
+
+  /** Rota el token (el anterior deja de servir) y extiende la vigencia de una invitación pendiente. */
+  async rotateInvitation(input: {
+    invitationId: string;
+    tokenHash: string;
+    expiresAt: Date;
+    userId: string;
+    requestId: string;
+  }) {
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.groupInvitation.updateMany({
+        where: { id: input.invitationId, status: InvitationStatus.PENDING },
+        data: {
+          tokenHash: input.tokenHash,
+          expiresAt: input.expiresAt,
+          lastSentAt: new Date(),
+          sendCount: { increment: 1 },
+        },
+      });
+      if (updated.count !== 1) return null;
+      await tx.auditLog.create({
+        data: {
+          userId: input.userId,
+          action: 'invitation.resent',
+          entityType: 'GroupInvitation',
+          entityId: input.invitationId,
+          requestId: input.requestId,
+        },
+      });
+      return tx.groupInvitation.findUnique({
+        where: { id: input.invitationId },
+        select: invitationView,
+      });
+    });
+  }
+
+  async revokeInvitation(invitationId: string, userId: string, requestId: string) {
+    return this.db.$transaction(async (tx) => {
+      const updated = await tx.groupInvitation.updateMany({
+        where: { id: invitationId, status: InvitationStatus.PENDING },
+        data: { status: InvitationStatus.REVOKED, revokedAt: new Date(), revokedById: userId },
+      });
+      if (updated.count !== 1) return null;
+      await tx.auditLog.create({
+        data: {
+          userId,
+          action: 'invitation.revoked',
+          entityType: 'GroupInvitation',
+          entityId: invitationId,
+          requestId,
+        },
+      });
+      return tx.groupInvitation.findUnique({ where: { id: invitationId }, select: invitationView });
     });
   }
 
   findInvitation(tokenHash: string) {
     return this.db.groupInvitation.findUnique({
       where: { tokenHash },
-      select: { id: true, groupId: true, email: true, role: true, status: true, expiresAt: true },
+      select: {
+        id: true,
+        groupId: true,
+        email: true,
+        role: true,
+        status: true,
+        expiresAt: true,
+        invitedById: true,
+        group: { select: { name: true } },
+        invitedBy: { select: { displayName: true } },
+      },
     });
   }
 
   /** Reclama la invitación con update condicional antes de crear la membresía. */
-  acceptInvitation(invitationId: string, groupId: string, userId: string, role: GroupRole) {
+  acceptInvitation(
+    invitationId: string,
+    groupId: string,
+    userId: string,
+    role: GroupRole,
+    requestId: string,
+  ) {
     return this.db.$transaction(async (tx) => {
       // updateMany funciona como claim optimista: solo una petición cambia PENDING a ACCEPTED.
       const claimed = await tx.groupInvitation.updateMany({
@@ -151,12 +309,50 @@ export class GroupsRepository {
         data: { status: InvitationStatus.ACCEPTED, acceptedById: userId, acceptedAt: new Date() },
       });
       if (claimed.count !== 1) return null;
-      return tx.groupMember.upsert({
+      const membership = await tx.groupMember.upsert({
         where: { groupId_userId: { groupId, userId } },
         create: { groupId, userId, role },
         update: {},
         select: { id: true, groupId: true, role: true, joinedAt: true },
       });
+      await tx.auditLog.create({
+        data: {
+          userId,
+          action: 'invitation.accepted',
+          entityType: 'GroupInvitation',
+          entityId: invitationId,
+          requestId,
+          metadata: { groupId },
+        },
+      });
+      return membership;
+    });
+  }
+
+  listCategories(groupId: string) {
+    return this.db.category.findMany({
+      where: { OR: [{ groupId }, { groupId: null }] },
+      select: { id: true, groupId: true, name: true, color: true },
+      orderBy: [{ groupId: 'asc' }, { name: 'asc' }],
+      take: 200,
+    });
+  }
+
+  createCategory(groupId: string, input: { name: string; color?: string | undefined }) {
+    return this.db.category.create({
+      data: { groupId, name: input.name, ...(input.color ? { color: input.color } : {}) },
+      select: { id: true, groupId: true, name: true, color: true },
+    });
+  }
+
+  deleteCategory(groupId: string, categoryId: string) {
+    return this.db.category.deleteMany({ where: { id: categoryId, groupId } });
+  }
+
+  findCategory(groupId: string, categoryId: string) {
+    return this.db.category.findFirst({
+      where: { id: categoryId, OR: [{ groupId }, { groupId: null }] },
+      select: { id: true },
     });
   }
 }

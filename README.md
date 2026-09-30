@@ -1,6 +1,6 @@
 # Cabales API
 
-API REST de Cabales para registrar grupos y eventos, dividir gastos manuales en centavos y producir liquidaciones verificables. Es un monolito modular en Express, TypeScript, Prisma 7 y PostgreSQL.
+API REST de Cabales para registrar grupos y eventos, dividir gastos manuales en centavos, producir liquidaciones verificables y operar fondos, presupuestos, documentos, OCR asistido, Cabudas, estadísticas, avisos, logros y derechos de privacidad. Es un monolito modular en Express, TypeScript, Prisma 7 y PostgreSQL.
 
 ## Arquitectura
 
@@ -10,7 +10,10 @@ La separación mínima es deliberada:
 - `src/database`: creación del adaptador PostgreSQL y Prisma Client.
 - `src/http`: composición Express, seguridad transversal, sobre de respuesta y errores.
 - `src/shared`: errores, criptografía, validación y dominio puro de dinero/liquidación.
-- `src/modules`: módulos `auth`, `groups`, `events`, `expenses` y `settlements`.
+- `src/infrastructure`: adaptadores intercambiables de correo, almacenamiento, OCR, push, límites de solicitudes (memoria/Redis), cliente HTTP saliente con timeout y reintentos, y tareas en segundo plano.
+- `src/composition.ts`: contenedor que construye proveedores, servicios y la app Express; conecta avisos y logros al bus de eventos de dominio (`src/shared/events.ts`).
+- `src/modules`: `auth`, `groups`, `events`, `expenses`, `settlements`, `funds`, `budgets`, `documents`, `ocr`, `cabudas`, `statistics`, `notifications`, `achievements` y `privacy` (incluye retención).
+- `src/jobs/retention.ts`: job de retención ejecutable por cron (`--dry-run`, `--scheduled`).
 - Cada módulo separa schema Zod, servicio de negocio, repositorio Prisma y router HTTP.
 - `prisma/schema.prisma`: modelo completo de persistencia. El despliegue no modifica el esquema al arrancar; las migraciones deben aplicarse explícitamente.
 - `docs/openapi.yaml`: contrato HTTP de la versión 1.
@@ -23,18 +26,83 @@ El dominio de dinero y liquidación no importa Express ni Prisma. Los repositori
 
 - Node.js 20.19 o superior.
 - pnpm 11 o superior.
-- PostgreSQL 15 o superior. `docker-compose.yml` ofrece PostgreSQL 17 para desarrollo. El servicio `api` es opcional.
+- PostgreSQL 15 o superior. `docker-compose.yml` ofrece PostgreSQL 17 y Redis 7 para desarrollo. El servicio `api` es opcional.
+- Redis solo es obligatorio con `RATE_LIMIT_STORE=redis` (siempre en producción).
 
 ## Inicio local
 
 1. Crear la configuración local a partir de `.env.example` y cambiar cualquier credencial compartida.
 2. Iniciar PostgreSQL con `docker compose up -d postgres` o usar una instancia aislada propia. `docker compose up --build api` levanta Express en el puerto 3000.
 3. Instalar exactamente el lockfile con `pnpm install --frozen-lockfile`.
-4. En desarrollo, aplicar el esquema con `pnpm db:push`. En un entorno gestionado, usar `pnpm db:migrate` después de añadir migraciones versionadas.
+4. Aplicar las migraciones versionadas con `pnpm db:migrate` (recomendado también en desarrollo). `pnpm db:push` solo sirve para prototipos desechables.
 5. Insertar catálogos públicos con `pnpm db:seed`.
 6. Iniciar desarrollo con `pnpm dev`.
 
 `db:reset` destruye y reconstruye la base indicada por `DATABASE_URL`; se debe usar únicamente contra una base desechable confirmada.
+
+## Bases existentes y baseline de migraciones
+
+Las migraciones versionadas viven en `prisma/migrations`. Una base creada con `prisma db push` no tiene `_prisma_migrations`, por lo que no se debe ejecutar `migrate deploy` hasta registrar de forma controlada el estado inicial.
+
+Para una base nueva, `pnpm db:migrate` aplica ambas migraciones. Para una base existente creada con `db push` antes de `20260926110000_initial_schema`, sigue exactamente este procedimiento desde `cabales-api`.
+
+1. Respalda la base en formato custom. En PowerShell, `$env:DATABASE_URL` es la variable de conexión; en una shell POSIX usa `$DATABASE_URL`:
+
+```powershell
+pg_dump -Fc --file=.\cabales-pre-initial-schema.dump $env:DATABASE_URL
+```
+
+2. Confirma, antes de ejecutar el puente, que el esquema real es el subconjunto estricto de `20260926110000_initial_schema`: solo faltan `EmailVerificationToken`, `PasswordResetToken`, `PrivacyRequest`, sus dos enums, sus PK/FK/índices, y `User.emailVerifiedAt`; no hay objetos extra ni definiciones distintas. El puente no corrige drift y no debe aplicarse si esa condición no se cumple.
+
+3. Ejecuta el puente aditivo e idempotente:
+
+```powershell
+pnpm exec prisma db execute --file prisma/baseline/pre-initial-schema-bridge.sql
+```
+
+4. Registra que la base ya coincide con la migración inicial:
+
+```powershell
+pnpm exec prisma migrate resolve --applied 20260926110000_initial_schema
+```
+
+5. Aplica la migración pendiente, que incluye la validación previa de filas y los `CHECK`:
+
+```powershell
+pnpm exec prisma migrate deploy
+```
+
+6. Comprueba el estado y que Prisma no vea drift:
+
+```powershell
+pnpm exec prisma migrate status
+pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
+```
+
+El último comando debe producir una migración vacía (sin SQL). `migrate status` debe indicar que no hay migraciones pendientes.
+
+No ejecutes `resolve` para ocultar diferencias de esquema ni borres filas de `_prisma_migrations`. Si el puente detecta o la inspección previa revela drift, detén el procedimiento y reconcilia/restaura la base; el puente solo crea los objetos ausentes y no modifica ni borra datos.
+
+Si necesitas volver al respaldo, detén la aplicación y restaura el archivo custom en una base objetivo aislada (o en la base original solo tras confirmar el destino):
+
+```sh
+pg_restore --clean --if-exists --dbname="$DATABASE_URL" ./cabales-pre-initial-schema.dump
+```
+
+En PowerShell, usa `pg_restore --clean --if-exists --dbname="$env:DATABASE_URL" .\cabales-pre-initial-schema.dump`. La restauración reemplaza los objetos y datos del destino por el contenido del respaldo; conserva el archivo hasta terminar la verificación.
+
+### Recuperación si aborta `20260926180000_modules_privacy_docs_funds`
+
+Si el preflight de esta migración aborta, Prisma marcará `P3018`. No borres datos ni fuerces la migración a ciegas: lee el mensaje completo, corrige únicamente los datos que el preflight identifica y vuelve a comprobar la consistencia. Después ejecuta, desde `cabales-api`:
+
+```powershell
+pnpm exec prisma migrate resolve --rolled-back 20260926180000_modules_privacy_docs_funds
+pnpm exec prisma migrate deploy
+pnpm exec prisma migrate status
+pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
+```
+
+`status` debe quedar sin migraciones pendientes y `diff` debe producir una migración vacía. Si el mensaje indica drift o filas que no pueden corregirse con seguridad, detén el proceso, respalda la base y reconcilia los datos manualmente; no uses `resolve` para ocultar diferencias.
 
 ## Variables
 
@@ -44,12 +112,21 @@ El dominio de dinero y liquidación no importa Express ni Prisma. Los repositori
 - `CORS_ORIGINS`: allowlist exacta separada por comas (`http://localhost:5173` y `http://127.0.0.1:5173` por defecto); nunca se usa comodín con credenciales.
 - `SESSION_TTL_HOURS`: vigencia de la sesión, por defecto 168 horas.
 - `COOKIE_NAME`: nombre de la cookie HttpOnly.
-- `RATE_LIMIT_MAX`: máximo global por IP cada 15 minutos.
-- `AUTH_RATE_LIMIT_MAX`: máximo más estricto para autenticación cada 15 minutos.
+- `RATE_LIMIT_STORE` (`memory`|`redis`) y `REDIS_URL`: store de límites; producción exige Redis compartido y el arranque falla sin él. Si Redis cae, los límites sensibles fallan cerrados (503) y el global deja pasar.
+- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX` y `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario).
+- `APP_ORIGIN` y `PUBLIC_API_ORIGIN`: bases de enlaces de correo y de URLs firmadas.
+- `EMAIL_VERIFICATION_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`, `INVITATION_TTL_DAYS`: vigencia de enlaces de un solo uso.
+- `EMAIL_PROVIDER` (`logging`|`http`), `EMAIL_FROM`, `EMAIL_HTTP_URL`, `EMAIL_HTTP_API_KEY`: correo transaccional; `logging` no envía ni registra contenido.
+- `STORAGE_PROVIDER` (`local`|`s3`), `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET` (≥32 caracteres en producción local), `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `SIGNED_URL_TTL_SECONDS`, `MAX_UPLOAD_BYTES`. S3 funciona con MinIO y nunca devuelve URLs permanentes.
+- `OCR_PROVIDER` (`disabled`|`local`|`http`), `OCR_HTTP_URL`, `OCR_HTTP_API_KEY`, `OCR_MAX_ATTEMPTS`; `local` es determinista y solo para desarrollo/pruebas, y falla en producción. `PUSH_PROVIDER` (`disabled`|`webpush`), `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`; la privada solo existe en el entorno del servidor.
+- `STATISTICS_EXPORT_MAX_ROWS` y `STATISTICS_EXPORT_RATE_LIMIT_MAX`: límite de filas y solicitudes de la exportación CSV.
+- `PRIVACY_EXPORT_TTL_DAYS` y `RETENTION_*_DAYS`: plazos provisionales de exportación y retención; deben confirmarse legalmente.
 - `TRUST_PROXY`: número exacto de proxies confiables delante de Express; `0` por defecto.
 - `LOG_LEVEL`: nivel de Pino; tokens, cookies, contraseñas y autorización se redactan.
 
 La configuración se valida con Zod antes de abrir el puerto o consultar la base. El cliente oficial es el repositorio hermano `cabales-app` (React, Tailwind, TypeScript, Vite) y consume `/api/v1` con cookies y CSRF.
+
+Para generar claves VAPID localmente, instala la dependencia y ejecuta `npx web-push generate-vapid-keys`; copia sus nombres de salida únicamente al gestor de secretos o al entorno del servidor. Nunca pongas `VAPID_PRIVATE_KEY`, credenciales S3, tokens ni claves generadas en Git, `.env.example`, logs o respuestas HTTP. `GET /api/v1/notifications/push-config` devuelve solo la clave pública cuando el proveedor está habilitado y `{ enabled: false, publicKey: null }` cuando está deshabilitado.
 
 ## Scripts
 
@@ -59,7 +136,9 @@ La configuración se valida con Zod antes de abrir el puerto o consultar la base
 - `pnpm start`: ejecuta el build.
 - `pnpm lint`: analiza fuente y pruebas.
 - `pnpm typecheck`: comprueba fuente, configuración y pruebas.
-- `pnpm test`: ejecuta Vitest sin requerir PostgreSQL.
+- `pnpm test`: ejecuta Vitest. Sin variables extra no requiere PostgreSQL ni Redis; la suite de integración se omite.
+- `pnpm test:integration`: con `TEST_DATABASE_URL` (base desechable cuyo nombre contenga `test`, con migraciones aplicadas) recorre el flujo completo contra PostgreSQL; con `TEST_REDIS_URL` además verifica límites compartidos entre dos instancias. La suite vacía todas las tablas de esa base.
+- `pnpm job:retention` / `pnpm job:retention:prod`: ejecuta la retención (`-- --dry-run` para solo contar).
 - `pnpm format` y `pnpm format:check`: aplica o verifica Prettier.
 - `pnpm db:generate`: genera Prisma Client.
 - `pnpm db:push`: sincroniza el schema con PostgreSQL para desarrollo; no debe usarse como paso automático de producción.
@@ -73,18 +152,19 @@ Toda respuesta usa el sobre `{ "success": true, "data": ..., "meta": ... }` o `{
 
 Endpoints públicos:
 
-- `GET /health`
-- `GET /ready`
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/login`
+- `GET /health`, `GET /ready`
+- `POST /api/v1/auth/register`, `POST /api/v1/auth/login`
+- `POST /api/v1/auth/email-verification/{request,resend,confirm}` y `POST /api/v1/auth/password-recovery/{request,resend,confirm}`: request/resend responden 202 idéntico exista o no la cuenta.
+- `GET /api/v1/storage/local/:token`: descarga con URL firmada de corta duración.
 
 Endpoints autenticados:
 
-- `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`
+- `POST /api/v1/auth/logout`, `GET|PATCH /api/v1/auth/me`
 - `POST|GET /api/v1/groups`
 - `GET|PATCH|DELETE /api/v1/groups/:groupId`
-- `POST /api/v1/groups/:groupId/invitations`
-- `POST /api/v1/groups/invitations/accept`
+- `GET|POST /api/v1/groups/:groupId/invitations`, `POST .../invitations/:invitationId/{resend,revoke}`
+- `POST /api/v1/groups/invitations/{preview,accept}`
+- `GET|POST /api/v1/groups/:groupId/categories`, `DELETE .../categories/:categoryId`
 - `POST|GET /api/v1/groups/:groupId/events`
 - `GET /api/v1/groups/:groupId/events/:eventId`
 - `POST|GET /api/v1/groups/:groupId/expenses`
@@ -92,6 +172,16 @@ Endpoints autenticados:
 - `POST|GET /api/v1/groups/:groupId/settlements`
 - `GET /api/v1/groups/:groupId/settlements/:settlementId`
 - `PATCH /api/v1/groups/:groupId/settlements/:settlementId/transfers/:transferId/paid`
+- Fondos: `/api/v1/groups/:groupId/funds` (CRUD, archivo, miembros, movimientos con `Idempotency-Key`).
+- Presupuestos: `/api/v1/groups/:groupId/budgets` (progreso del periodo, historial y alertas).
+- Documentos: `/api/v1/documents` (subida binaria validada por firma, permisos, URL firmada, bitácora).
+- OCR: `/api/v1/ocr/jobs` (asíncrono; solo propone y exige confirmación humana).
+- Cabudas: `/api/v1/cabudas/{summary,history}`; Estadísticas: `/api/v1/statistics/summary` y `/api/v1/statistics/summary/export` (CSV acotado, moneda explícita, escape de fórmulas y rate limit).
+- Avisos: `/api/v1/notifications` (lista, contador, lectura, archivo, preferencias, `push-config` y suscripciones push).
+- Logros: `/api/v1/achievements` y `/history`.
+- Privacidad: `/api/v1/privacy/requests` (ARCO-POL, confirmación, cancelación, exportación JSON).
+
+`tests/openapi-contract.test.ts` verifica que cada ruta implementada esté documentada en `docs/openapi.yaml` y viceversa.
 
 Crear gasto y liquidación exige `Idempotency-Key`. Una respuesta se reproduce durante 24 horas; después, la misma llave puede reclamarse de nuevo de forma atómica. Toda mutación autenticada exige que `X-CSRF-Token` coincida con la cookie CSRF y con el hash ligado a la sesión. `GET /auth/me` devuelve ese token solo después de validar la cookie contra la sesión, lo que permite recuperarlo tras una recarga en otro host autorizado.
 
@@ -113,16 +203,18 @@ Prisma no genera restricciones `CHECK`. Los servicios MVP verifican positividad,
 ## Seguridad
 
 - Contraseñas con Argon2id y salt administrado por la biblioteca.
-- Tokens de sesión e invitación aleatorios; PostgreSQL conserva solo SHA-256 de los tokens.
+- Tokens de sesión, invitación, verificación y recuperación aleatorios; PostgreSQL conserva solo SHA-256. Los enlaces de correo llevan el token en el fragmento `#token=` para que no llegue a logs ni Referer. Recuperar contraseña revoca todas las sesiones.
+- Documentos: tipo permitido validado contra la firma binaria, nombre saneado, clave opaca nunca expuesta, descarga con `Content-Disposition: attachment`, `nosniff` y CSP `sandbox`. Sin acceso se responde 404 para no revelar existencia.
+- Exportación de privacidad sin secretos, IP, user-agent ni datos personales de terceros. La supresión exige contraseña, anonimiza y conserva la integridad financiera de los demás.
 - Sesiones expirables y revocables en cookie `HttpOnly`, `SameSite=Lax` y `Secure` en producción.
 - Token CSRF por sesión en cabecera y cookie separada, comparado en tiempo constante.
 - Las respuestas de autenticación y rutas privadas usan `Cache-Control: private, no-store`; health y readiness usan `no-store` para evitar estados obsoletos.
 - RBAC `OWNER`, `ADMIN`, `MEMBER`; el actor siempre se deriva de la sesión.
-- Helmet, CORS allowlist del cliente React, JSON máximo de 32 KB, rate limit global y límite estricto solo en login/register. `Cross-Origin-Resource-Policy` es `cross-origin` para que cabales-app en Vite pueda leer respuestas con cookies.
+- Helmet, CORS allowlist del cliente React (antes de los límites para que un 429 siga siendo legible), JSON máximo de 32 KB, rate limit global y límites específicos por IP, correo (hash) o usuario en autenticación, recuperación, invitaciones, subidas, OCR y privacidad, con `Retry-After`. `Cross-Origin-Resource-Policy` es `cross-origin` para que cabales-app en Vite pueda leer respuestas con cookies.
 - Consultas parametrizadas mediante Prisma, errores centralizados y logs JSON sin secretos.
 - Gastos, cierres, pagos y cambios parentales críticos usan transacciones `Serializable` con hasta tres intentos ante `P2034`.
 - El cambio de moneda y borrado bloquean la fila del grupo; la creación de gasto toma un bloqueo compartido. Las FK hacen que creaciones concurrentes esperen o fallen de forma segura.
-- El rate limit en memoria sirve a una instancia. Producción con varias réplicas requiere un store compartido. `TRUST_PROXY` debe coincidir exactamente con los saltos controlados; un valor excesivo permite falsificar la IP cliente.
+- El rate limit en memoria sirve a una instancia; producción usa Redis (`RATE_LIMIT_STORE=redis`) con incremento atómico en Lua. `TRUST_PROXY` debe coincidir exactamente con los saltos controlados; un valor excesivo permite falsificar la IP cliente.
 
 ## Modelo
 
@@ -150,17 +242,20 @@ pnpm format:check
 
 Para `prisma validate` basta una URL PostgreSQL sintácticamente válida; no abre una conexión.
 
-La verificación actual del repositorio pasa typecheck, lint, formato, build y las 28 pruebas de API. Las pruebas de integración contra PostgreSQL y las pruebas de concurrencia requieren una base aislada y no forman parte de la ejecución local predeterminada.
+La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contra PostgreSQL real, registro y verificación, invitaciones (duplicado, reenvío, revocación, vista previa, aceptación), categorías, presupuesto con alerta, gasto, Cabudas antes y después del cierre, pago, estadísticas, fondos (idempotencia, permisos, retiros concurrentes sin saldo negativo), documentos (firma binaria, permisos, URL firmada), OCR con confirmación, logros, avisos, exportación y supresión de privacidad, recuperación de contraseña y retención; y con Redis, límites compartidos entre dos instancias.
 
 ## Límites actuales
 
-- El MVP implementa API para autenticación, grupos, invitaciones, eventos, gastos manuales y liquidaciones. Fondos, OCR, documentos, presupuestos, recurrencia, notificaciones y logros están modelados pero aún no tienen endpoints.
+- Gastos recurrentes, etiquetas y enlaces de evento siguen modelados sin endpoints.
+- Proveedores reales pendientes de decisión: correo (`http` compatible con Resend; SMTP no implementado). S3 compatible y Web Push/VAPID ya están disponibles por configuración; OCR `local` sigue reservado a desarrollo/pruebas.
+- Los plazos `RETENTION_*_DAYS` y `PRIVACY_EXPORT_TTL_DAYS` son provisionales hasta validación legal. Rectificación y oposición quedan `IN_PROGRESS` para atención manual.
 - No hay edición ni borrado de gastos financieros; al cerrar el evento quedan inmutables por diseño.
 - Los invitados no tienen identidad autenticada y una transferencia suya debe marcarla un OWNER o ADMIN.
-- No se envían correos: el token de invitación se devuelve una sola vez al creador y el cliente lo transporta en un fragmento de URL, que no se envía en la cabecera Referer.
+- El token de invitación se envía por correo y además se devuelve una sola vez al creador (`delivery: manual` cuando no hay proveedor real) para compartir el enlace; viaja en un fragmento de URL.
+- El registro responde 409 `EMAIL_IN_USE` ante un correo existente: compromiso conocido de enumeración mitigado con límites por IP y correo.
 - El claim de invitación es un `updateMany` condicional atómico antes del `upsert` de membresía.
 - Los bloqueos `FOR UPDATE`/`FOR SHARE`, carreras de FK y colisiones únicas se implementan para PostgreSQL, pero requieren una prueba de concurrencia contra una base aislada que no se ejecutó en esta tarea.
-- `DOCUMENTACION.md` incluye cada archivo mantenido y `package-lock.json`; excluye `node_modules`, `dist`, cobertura y Prisma Client generado, que no se versionan ni se mantienen manualmente.
+- `pnpm-lock.yaml` es el único lockfile canónico; `package-lock.json` se eliminó para no mantener dos árboles de dependencias divergentes. Se excluyen `node_modules`, `dist`, cobertura y Prisma Client generado.
 - Las migraciones versionadas viven en `prisma/migrations`; `pnpm db:migrate` aplica únicamente las migraciones existentes y no cambia el esquema automáticamente al arrancar.
 
 ## Principios aplicados

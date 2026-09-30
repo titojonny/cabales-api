@@ -15,6 +15,30 @@ export function validateBody(schema: ZodType) {
   };
 }
 
+/** Valida la query string (Express 5 la expone como solo lectura) y la deja en req.validatedQuery. */
+export function validateQuery(schema: ZodType) {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    const raw: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(req.query)) {
+      // Rechaza parámetros repetidos o anidados para evitar ambigüedad y contaminación.
+      if (typeof value !== 'string') {
+        next(new AppError(400, 'VALIDATION_ERROR', `El parametro ${key} no es valido`));
+        return;
+      }
+      raw[key] = value;
+    }
+    const result = schema.safeParse(raw);
+    if (!result.success) {
+      next(
+        new AppError(400, 'VALIDATION_ERROR', 'Los parametros no son validos', result.error.issues),
+      );
+      return;
+    }
+    req.validatedQuery = result.data;
+    next();
+  };
+}
+
 /** Lee un parámetro UUID ya validado en la frontera de ruta. */
 export function uuidParam(value: string | string[] | undefined): string {
   if (
@@ -24,6 +48,11 @@ export function uuidParam(value: string | string[] | undefined): string {
     throw new AppError(400, 'INVALID_ID', 'El identificador no es un UUID valido');
   }
   return value;
+}
+
+/** Lee el groupId heredado por routers anidados con mergeParams. */
+export function groupParam(req: Request): string {
+  return uuidParam((req.params as Record<string, string | undefined>)['groupId']);
 }
 
 /** Exige y acota la llave usada por mutaciones financieras. */

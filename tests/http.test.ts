@@ -16,6 +16,8 @@ const user = {
   email: 'ana@example.com',
   displayName: 'Ana',
   avatarUrl: null,
+  locale: 'es',
+  emailVerified: false,
 };
 const session: SessionResult = {
   user,
@@ -35,6 +37,12 @@ function fixture(ready = true, env: Record<string, string> = {}) {
       csrfTokenHash: hashToken(session.csrfToken),
     })),
     logout: vi.fn(async () => undefined),
+    requestEmailVerification: vi.fn(async () => undefined),
+    verifyEmail: vi.fn(async () => user),
+    requestPasswordReset: vi.fn(async () => undefined),
+    resetPassword: vi.fn(async () => undefined),
+    updateProfile: vi.fn(async () => user),
+    verifyPassword: vi.fn(async () => true),
   };
   const groups = {
     create: vi.fn(),
@@ -174,5 +182,90 @@ describe('HTTP auth aislado', () => {
     expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     expect(response.headers['access-control-allow-credentials']).toBe('true');
     expect(response.headers['cross-origin-resource-policy']).toBe('cross-origin');
+  });
+});
+
+describe('HTTP recuperación y límites', () => {
+  it('responde 202 idéntico exista o no la cuenta (anti-enumeración)', async () => {
+    const { app, auth } = fixture();
+    const known = await request(app)
+      .post('/api/v1/auth/password-recovery/request')
+      .send({ email: 'ana@example.com' });
+    const unknown = await request(app)
+      .post('/api/v1/auth/password-recovery/request')
+      .send({ email: 'nadie@example.com' });
+    expect(known.status).toBe(202);
+    expect(unknown.status).toBe(202);
+    expect(known.body.data).toEqual(unknown.body.data);
+    expect(auth.requestPasswordReset).toHaveBeenCalledTimes(2);
+  });
+
+  it('limita recuperación por correo normalizado con 429, Retry-After y CORS legible', async () => {
+    const { app } = fixture(true, { RECOVERY_RATE_LIMIT_MAX: '1' });
+    const send = (email: string) =>
+      request(app)
+        .post('/api/v1/auth/password-recovery/request')
+        .set('Origin', 'http://localhost:5173')
+        .send({ email });
+    expect((await send('ana@example.com')).status).toBe(202);
+    const limited = await send('  ANA@example.com ');
+    expect(limited.status).toBe(429);
+    expect(limited.body.error.code).toBe('RATE_LIMITED');
+    expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+    expect(limited.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    // Otro correo desde la misma IP sigue permitido hasta el límite por IP.
+    expect((await send('otra@example.com')).status).toBe(202);
+  });
+
+  it('confirma recuperación y limpia cookies del navegador', async () => {
+    const { app, auth } = fixture();
+    const response = await request(app)
+      .post('/api/v1/auth/password-recovery/confirm')
+      .send({ token: 'a'.repeat(43), password: 'una-clave-segura-123' });
+    expect(response.status).toBe(200);
+    expect(auth.resetPassword).toHaveBeenCalledOnce();
+    const cookies = (response.headers['set-cookie'] as unknown as string[]).join(';');
+    expect(cookies).toContain('cabales_session=;');
+  });
+
+  it('rechaza tokens con caracteres fuera de base64url', async () => {
+    const response = await request(fixture().app)
+      .post('/api/v1/auth/email-verification/confirm')
+      .send({ token: '<script>'.repeat(6) });
+    expect(response.status).toBe(400);
+  });
+
+  it('PATCH /me exige CSRF y valida el cuerpo', async () => {
+    const { app, auth } = fixture();
+    const cookies = ['cabales_session=session-token', 'cabales_session_csrf=csrf-token'];
+    const noCsrf = await request(app)
+      .patch('/api/v1/auth/me')
+      .set('Cookie', cookies)
+      .send({ displayName: 'Ana M' });
+    expect(noCsrf.status).toBe(403);
+    const invalid = await request(app)
+      .patch('/api/v1/auth/me')
+      .set('Cookie', cookies)
+      .set('X-CSRF-Token', 'csrf-token')
+      .send({ email: 'otro@example.com' });
+    expect(invalid.status).toBe(400);
+    const ok = await request(app)
+      .patch('/api/v1/auth/me')
+      .set('Cookie', cookies)
+      .set('X-CSRF-Token', 'csrf-token')
+      .send({ displayName: 'Ana M' });
+    expect(ok.status).toBe(200);
+    expect(auth.updateProfile).toHaveBeenCalledWith(
+      user.id,
+      { displayName: 'Ana M' },
+      expect.any(String),
+    );
+  });
+
+  it('no expone cabeceras de tecnología y fija políticas seguras', async () => {
+    const response = await request(fixture().app).get('/health');
+    expect(response.headers['x-powered-by']).toBeUndefined();
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['strict-transport-security']).toBeDefined();
   });
 });

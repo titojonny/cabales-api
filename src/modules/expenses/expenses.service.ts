@@ -3,6 +3,7 @@ import { requestHash } from '../../shared/crypto.js';
 import { AppError, ensure } from '../../shared/errors.js';
 import { assertCurrency, assertExactTotal, splitEqual } from '../../shared/money.js';
 import type { GroupsService } from '../groups/groups.service.js';
+import type { DomainEvents } from '../../shared/events.js';
 import type { CreateExpenseInput } from './expenses.schema.js';
 import type { ExpensesRepository, PreparedExpense } from './expenses.repository.js';
 
@@ -11,6 +12,7 @@ export class ExpensesService {
   constructor(
     private readonly repository: ExpensesRepository,
     private readonly groups: GroupsService,
+    private readonly events?: DomainEvents,
   ) {}
 
   async create(
@@ -47,6 +49,7 @@ export class ExpensesService {
       'El evento ya no admite gastos',
     );
     assertCurrency(input.currency);
+    if (input.categoryId) await this.groups.assertCategory(groupId, input.categoryId);
     ensure(
       input.currency === context.group.currency,
       422,
@@ -131,6 +134,7 @@ export class ExpensesService {
       eventId: input.eventId,
       title: input.title,
       ...(input.notes ? { notes: input.notes } : {}),
+      ...(input.categoryId ? { categoryId: input.categoryId } : {}),
       totalCents: input.totalCents,
       currency: input.currency,
       splitMode: input.splitMode as SplitMode,
@@ -157,6 +161,10 @@ export class ExpensesService {
         'IDEMPOTENCY_CONFLICT',
         'La llave ya se uso con otra solicitud',
       );
+      if (!result.replayed) {
+        const expenseId = (result.data as { id?: string } | null)?.id;
+        if (expenseId) this.events?.emit({ type: 'expense.created', groupId, expenseId, userId });
+      }
       return { data: result.data, replayed: result.replayed };
     } catch (error) {
       if (error instanceof Error && error.message === 'EVENT_LOCKED') {

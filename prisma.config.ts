@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { defineConfig } from '@prisma/config';
+import { defineConfig } from 'prisma/config';
 
 /** Configura schema, seed y URL externa para Prisma 7; el despliegue aplica migraciones aparte. */
 export default defineConfig({
