@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { MAX_MONEY_CENTS } from '../../shared/money.js';
 
 const cents = z.number().int().positive().max(MAX_MONEY_CENTS);
+const nonNegativeCents = z.number().int().nonnegative().max(MAX_MONEY_CENTS);
+const basisPoints = z.number().int().nonnegative().max(10_000);
 const dateTime = z
   .string()
   .datetime({ offset: true })
@@ -17,16 +19,27 @@ export const createExpenseSchema = z
     notes: z.string().trim().max(1000).optional(),
     categoryId: z.string().uuid().optional(),
     totalCents: cents,
+    subtotalCents: cents.optional(),
+    taxCents: nonNegativeCents.optional(),
+    taxPercentBps: basisPoints.optional(),
+    tipCents: nonNegativeCents.optional(),
+    tipPercentBps: basisPoints.optional(),
     currency: z
       .string()
       .trim()
       .toUpperCase()
       .regex(/^[A-Z]{3}$/),
-    splitMode: z.enum(['EQUAL', 'EXACT']),
+    splitMode: z.enum(['EQUAL', 'EXACT', 'PERCENT']),
     occurredAt: dateTime,
     participants: z
       .array(
-        z.object({ eventParticipantId: z.string().uuid(), shareCents: cents.optional() }).strict(),
+        z
+          .object({
+            eventParticipantId: z.string().uuid(),
+            shareCents: nonNegativeCents.optional(),
+            percentageBps: basisPoints.optional(),
+          })
+          .strict(),
       )
       .min(1)
       .max(200),
@@ -46,7 +59,23 @@ export const createExpenseSchema = z
       .max(500)
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.taxCents !== undefined && value.taxPercentBps !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['taxCents'],
+        message: 'Usa importe o porcentaje para el impuesto, no ambos.',
+      });
+    }
+    if (value.tipCents !== undefined && value.tipPercentBps !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['tipCents'],
+        message: 'Usa importe o porcentaje para la propina, no ambos.',
+      });
+    }
+  });
 
 /** Gasto estructuralmente válido pendiente de comprobar sus sumas. */
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;

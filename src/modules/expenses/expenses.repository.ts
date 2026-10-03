@@ -18,10 +18,19 @@ export interface PreparedExpense {
   notes?: string;
   categoryId?: string;
   totalCents: number;
+  subtotalCents: number;
+  taxCents: number;
+  tipCents: number;
   currency: string;
   splitMode: SplitMode;
   occurredAt: Date;
-  participants: Array<{ eventParticipantId: string; shareCents: number }>;
+  participants: Array<{
+    eventParticipantId: string;
+    subtotalCents: number;
+    taxCents: number;
+    tipCents: number;
+    shareCents: number;
+  }>;
   payers: Array<{ eventParticipantId: string; amountCents: number }>;
   items: Array<{
     name: string;
@@ -38,6 +47,9 @@ const expenseDetail = {
   title: true,
   notes: true,
   totalCents: true,
+  subtotalCents: true,
+  taxCents: true,
+  tipCents: true,
   currency: true,
   splitMode: true,
   occurredAt: true,
@@ -47,6 +59,9 @@ const expenseDetail = {
     select: {
       id: true,
       eventParticipantId: true,
+      subtotalCents: true,
+      taxCents: true,
+      tipCents: true,
       shareCents: true,
       eventParticipant: { select: { guestName: true, groupMemberId: true } },
     },
@@ -100,6 +115,9 @@ export class ExpensesRepository {
         eventId: true,
         title: true,
         totalCents: true,
+        subtotalCents: true,
+        taxCents: true,
+        tipCents: true,
         currency: true,
         splitMode: true,
         occurredAt: true,
@@ -237,6 +255,9 @@ export class ExpensesRepository {
                 ...(input.expense.notes ? { notes: input.expense.notes } : {}),
                 ...(input.expense.categoryId ? { categoryId: input.expense.categoryId } : {}),
                 totalCents: input.expense.totalCents,
+                subtotalCents: input.expense.subtotalCents,
+                taxCents: input.expense.taxCents,
+                tipCents: input.expense.tipCents,
                 currency: input.expense.currency,
                 splitMode: input.expense.splitMode,
                 occurredAt: input.expense.occurredAt,

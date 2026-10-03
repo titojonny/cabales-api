@@ -409,16 +409,36 @@ describe.skipIf(!TEST_DATABASE_URL)('Integración PostgreSQL: flujo completo de 
       { 'Idempotency-Key': 'statistics-isolated-expense-0001' },
     );
     expect(firstExpense.status).toBe(201);
+    const invalidPercentExpense = await ana.post(
+      `/groups/${statsGroupId}/expenses`,
+      {
+        eventId: statsEvent.body.data.id,
+        title: 'Porcentaje inválido',
+        totalCents: 900,
+        subtotalCents: 900,
+        currency: 'USD',
+        splitMode: 'PERCENT',
+        occurredAt,
+        participants: [{ eventParticipantId: statsParticipant, percentageBps: 9999 }],
+        payers: [{ eventParticipantId: statsParticipant, amountCents: 900 }],
+      },
+      { 'Idempotency-Key': 'statistics-invalid-percent-0001' },
+    );
+    expect(invalidPercentExpense.status).toBe(422);
+    expect(invalidPercentExpense.body.error.code).toBe('PERCENTAGES_MISMATCH');
     const secondExpense = await ana.post(
       `/groups/${statsGroupId}/expenses`,
       {
         eventId: statsEvent.body.data.id,
         title: 'Comida sin categorizar',
         totalCents: 900,
+        subtotalCents: 800,
+        taxCents: 50,
+        tipCents: 50,
         currency: 'USD',
-        splitMode: 'EXACT',
+        splitMode: 'PERCENT',
         occurredAt,
-        participants: [{ eventParticipantId: statsParticipant, shareCents: 900 }],
+        participants: [{ eventParticipantId: statsParticipant, percentageBps: 10_000 }],
         payers: [{ eventParticipantId: statsParticipant, amountCents: 900 }],
       },
       { 'Idempotency-Key': 'statistics-isolated-expense-0002' },
@@ -445,6 +465,7 @@ describe.skipIf(!TEST_DATABASE_URL)('Integración PostgreSQL: flujo completo de 
     expect(csv.headers['content-type']).toContain('text/csv');
     expect(csv.text).toContain('USD');
     expect(csv.text).toContain('amountCents');
+    expect(csv.text).toContain('subtotalCents,taxCents,tipCents');
     const carlStats = await carl.get('/statistics/summary');
     expect(carlStats.body.data.totals.spentCents).toBe(0);
     expect((await carl.get(`/statistics/summary?groupId=${statsGroupId}`)).status).toBe(404);

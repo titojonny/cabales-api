@@ -33,6 +33,9 @@ const CSV_HEADER = [
   'groupId',
   'eventId',
   'budgetId',
+  'subtotalCents',
+  'taxCents',
+  'tipCents',
 ];
 
 /** Escapa RFC 4180 y neutraliza celdas interpretables como fórmulas por hojas de cálculo. */
@@ -46,13 +49,22 @@ export interface StatisticsCsvSummary {
   currency: string | null;
   totals: {
     spentCents: number;
+    subtotalCents?: number;
+    taxCents?: number;
+    tipCents?: number;
     expenseCount: number;
     myShareCents: number;
     myPaidCents: number;
   };
   byCategory: Array<{ name: string; totalCents: number; count: number }>;
   byGroup: Array<{ groupId: string; name: string; totalCents: number; count: number }>;
-  byEvent: Array<{ eventId: string; name: string; groupId: string; totalCents: number; count: number }>;
+  byEvent: Array<{
+    eventId: string;
+    name: string;
+    groupId: string;
+    totalCents: number;
+    count: number;
+  }>;
   byPerson: Array<{ displayName: string; paidCents: number; shareCents: number }>;
   trend: Array<{ period: string; totalCents: number; myShareCents: number }>;
   budgets: Array<{
@@ -69,24 +81,85 @@ export function buildStatisticsCsv(summary: StatisticsCsvSummary, maxRows: numbe
   const rows: unknown[][] = [CSV_HEADER];
   const add = (row: unknown[]) => {
     if (rows.length >= maxRows + 1)
-      throw new AppError(413, 'STATISTICS_EXPORT_TOO_LARGE', 'La exportacion excede el limite de filas');
+      throw new AppError(
+        413,
+        'STATISTICS_EXPORT_TOO_LARGE',
+        'La exportacion excede el limite de filas',
+      );
     rows.push(row);
   };
-  add(['totals', 'Total gastado', summary.currency, summary.totals.spentCents, summary.totals.expenseCount]);
+  add([
+    'totals',
+    'Total gastado',
+    summary.currency,
+    summary.totals.spentCents,
+    summary.totals.expenseCount,
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    summary.totals.subtotalCents ?? summary.totals.spentCents,
+    summary.totals.taxCents ?? 0,
+    summary.totals.tipCents ?? 0,
+  ]);
   add(['totals', 'Mi parte', summary.currency, summary.totals.myShareCents]);
   add(['totals', 'Mis pagos', summary.currency, summary.totals.myPaidCents]);
   for (const item of summary.byCategory)
     add(['category', item.name, summary.currency, item.totalCents, item.count]);
   for (const item of summary.byGroup)
-    add(['group', item.name, summary.currency, item.totalCents, item.count, '', '', '', item.groupId]);
+    add([
+      'group',
+      item.name,
+      summary.currency,
+      item.totalCents,
+      item.count,
+      '',
+      '',
+      '',
+      item.groupId,
+    ]);
   for (const item of summary.byEvent)
-    add(['event', item.name, summary.currency, item.totalCents, item.count, '', '', '', item.groupId, item.eventId]);
+    add([
+      'event',
+      item.name,
+      summary.currency,
+      item.totalCents,
+      item.count,
+      '',
+      '',
+      '',
+      item.groupId,
+      item.eventId,
+    ]);
   for (const item of summary.byPerson)
     add(['person', item.displayName, summary.currency, '', '', item.shareCents, item.paidCents]);
   for (const item of summary.trend)
-    add(['trend', item.period, summary.currency, item.totalCents, '', item.myShareCents, '', item.period]);
+    add([
+      'trend',
+      item.period,
+      summary.currency,
+      item.totalCents,
+      '',
+      item.myShareCents,
+      '',
+      item.period,
+    ]);
   for (const item of summary.budgets)
-    add(['budget', item.name, summary.currency, item.amountCents, '', item.spentCents, '', '', item.groupId, '', item.budgetId]);
+    add([
+      'budget',
+      item.name,
+      summary.currency,
+      item.amountCents,
+      '',
+      item.spentCents,
+      '',
+      '',
+      item.groupId,
+      '',
+      item.budgetId,
+    ]);
   return rows.map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
@@ -142,6 +215,9 @@ export class StatisticsService {
       granularity: 'month' as const,
       totals: {
         spentCents: 0,
+        subtotalCents: 0,
+        taxCents: 0,
+        tipCents: 0,
         expenseCount: 0,
         myShareCents: 0,
         myPaidCents: 0,
@@ -160,6 +236,9 @@ export class StatisticsService {
       where: { ...baseWhere, currency },
       select: {
         totalCents: true,
+        subtotalCents: true,
+        taxCents: true,
+        tipCents: true,
         occurredAt: true,
         groupId: true,
         event: { select: { id: true, name: true } },
@@ -205,11 +284,17 @@ export class StatisticsService {
     >();
     const trend = new Map<string, { totalCents: number; myShareCents: number }>();
     let spent = 0;
+    let subtotal = 0;
+    let tax = 0;
+    let tip = 0;
     let myShare = 0;
     let myPaid = 0;
 
     for (const expense of expenses) {
       spent += expense.totalCents;
+      subtotal += expense.subtotalCents;
+      tax += expense.taxCents;
+      tip += expense.tipCents;
       const categoryKey = expense.category?.id ?? 'none';
       const category = byCategory.get(categoryKey) ?? {
         categoryId: expense.category?.id ?? null,
@@ -286,6 +371,9 @@ export class StatisticsService {
       granularity,
       totals: {
         spentCents: spent,
+        subtotalCents: subtotal,
+        taxCents: tax,
+        tipCents: tip,
         expenseCount: expenses.length,
         myShareCents: myShare,
         myPaidCents: myPaid,

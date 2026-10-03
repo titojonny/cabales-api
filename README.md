@@ -2,6 +2,12 @@
 
 API REST de Cabales para registrar grupos y eventos, dividir gastos manuales en centavos, producir liquidaciones verificables y operar fondos, presupuestos, documentos, OCR asistido, Cabudas, estadísticas, avisos, logros y derechos de privacidad. Es un monolito modular en Express, TypeScript, Prisma 7 y PostgreSQL.
 
+## P2: reparto porcentual e importes adicionales
+
+Los gastos admiten `EQUAL`, `EXACT` y `PERCENT`. En `PERCENT`, cada participante envía `percentageBps` y la suma debe ser exactamente `10000`; el servicio calcula el subtotal con restos mayores. `subtotalCents` es la base y `totalCents` debe ser exactamente `subtotalCents + taxCents + tipCents`. Impuesto y propina aceptan importe (`taxCents`/`tipCents`) o porcentaje (`taxPercentBps`/`tipPercentBps`) sobre el subtotal, no ambos. Los porcentajes se redondean al centavo más cercano con mitad hacia arriba (`floor((subtotalCents * bps + 5000) / 10000)`). Cada cargo se reparte proporcionalmente al subtotal de las personas, también cuando ese subtotal proviene de ítems, usando restos mayores.
+
+La migración `20261003130000_expense_breakdown_percent` agrega el enum `PERCENT`, los importes del gasto y el desglose por participante con default `0`, realiza un preflight y valida CHECK de no negativos y consistencia. La exportación estadística CSV añade `subtotalCents`, `taxCents` y `tipCents`.
+
 ## Arquitectura
 
 La separación mínima es deliberada:

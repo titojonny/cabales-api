@@ -1,7 +1,12 @@
-import { EventStatus, GroupRole, SplitMode } from '@prisma/client';
+import { EventStatus, GroupRole, type SplitMode } from '@prisma/client';
 import { requestHash } from '../../shared/crypto.js';
 import { AppError, ensure } from '../../shared/errors.js';
-import { assertCurrency, assertExactTotal, splitEqual } from '../../shared/money.js';
+import { assertCurrency, assertExactTotal, splitEqual, sumCents } from '../../shared/money.js';
+import {
+  roundBasisPointCharge,
+  splitByBasisPoints,
+  splitProportionally,
+} from '../../shared/expense-splitting.js';
 import type { GroupsService } from '../groups/groups.service.js';
 import type { DomainEvents } from '../../shared/events.js';
 import type { CreateExpenseInput } from './expenses.schema.js';
@@ -74,33 +79,124 @@ export class ExpensesService {
       'Un participante no pertenece al evento',
     );
 
-    const shares =
-      input.splitMode === SplitMode.EQUAL
-        ? splitEqual(input.totalCents, participantIds.length)
-        : input.participants.map((participant) => {
-            ensure(
-              participant.shareCents !== undefined,
-              422,
-              'SHARE_REQUIRED',
-              'EXACT requiere shareCents',
-            );
-            return participant.shareCents;
-          });
-    if (input.splitMode === SplitMode.EQUAL) {
+    const hasChargeInput =
+      input.taxCents !== undefined ||
+      input.taxPercentBps !== undefined ||
+      input.tipCents !== undefined ||
+      input.tipPercentBps !== undefined;
+    ensure(
+      !(input.taxCents !== undefined && input.taxPercentBps !== undefined),
+      422,
+      'CHARGE_MODE_CONFLICT',
+      'El impuesto acepta importe o porcentaje, no ambos',
+    );
+    ensure(
+      !(input.tipCents !== undefined && input.tipPercentBps !== undefined),
+      422,
+      'CHARGE_MODE_CONFLICT',
+      'La propina acepta importe o porcentaje, no ambos',
+    );
+    ensure(
+      !hasChargeInput || input.subtotalCents !== undefined,
+      422,
+      'SUBTOTAL_REQUIRED',
+      'subtotalCents es obligatorio cuando se informa impuesto o propina',
+    );
+    const subtotalCents = input.subtotalCents ?? input.totalCents;
+    const taxCents =
+      input.taxCents ??
+      (input.taxPercentBps === undefined
+        ? 0
+        : roundBasisPointCharge(subtotalCents, input.taxPercentBps));
+    const tipCents =
+      input.tipCents ??
+      (input.tipPercentBps === undefined
+        ? 0
+        : roundBasisPointCharge(subtotalCents, input.tipPercentBps));
+    ensure(
+      sumCents([subtotalCents, taxCents, tipCents]) === input.totalCents,
+      422,
+      'TOTAL_MISMATCH',
+      'totalCents debe ser subtotalCents + impuesto + propina',
+    );
+
+    const splitMode = input.splitMode as 'EQUAL' | 'EXACT' | 'PERCENT';
+    const subtotalShares =
+      splitMode === 'EQUAL'
+        ? splitEqual(subtotalCents, participantIds.length)
+        : splitMode === 'PERCENT'
+          ? splitByBasisPoints(
+              subtotalCents,
+              input.participants.map((participant) => {
+                ensure(
+                  participant.percentageBps !== undefined,
+                  422,
+                  'PERCENTAGE_REQUIRED',
+                  'PERCENT requiere percentageBps para cada participante',
+                );
+                ensure(
+                  participant.shareCents === undefined,
+                  422,
+                  'UNEXPECTED_SHARE',
+                  'PERCENT calcula las partes a partir de percentageBps',
+                );
+                return participant.percentageBps;
+              }),
+            )
+          : input.participants.map((participant) => {
+              ensure(
+                participant.shareCents !== undefined,
+                422,
+                'SHARE_REQUIRED',
+                'EXACT requiere shareCents',
+              );
+              ensure(
+                participant.percentageBps === undefined,
+                422,
+                'UNEXPECTED_PERCENTAGE',
+                'EXACT no acepta percentageBps',
+              );
+              return participant.shareCents;
+            });
+    if (splitMode === 'EQUAL') {
       ensure(
-        input.participants.every((participant) => participant.shareCents === undefined),
+        input.participants.every(
+          (participant) =>
+            participant.shareCents === undefined && participant.percentageBps === undefined,
+        ),
         422,
         'UNEXPECTED_SHARE',
         'EQUAL calcula las partes automaticamente',
       );
     }
-    assertExactTotal(input.totalCents, shares, 'SHARES_MISMATCH');
+    if (splitMode === 'PERCENT') {
+      ensure(
+        sumCents(subtotalShares) === subtotalCents,
+        422,
+        'SHARES_MISMATCH',
+        'Las partes porcentuales no suman el subtotal',
+      );
+    } else {
+      assertExactTotal(subtotalCents, subtotalShares, 'SHARES_MISMATCH');
+    }
+
+    const taxShares = splitProportionally(taxCents, subtotalShares);
+    const tipShares = splitProportionally(tipCents, subtotalShares);
+    const shares = subtotalShares.map(
+      (share, index) => share + taxShares[index]! + tipShares[index]!,
+    );
+    ensure(
+      sumCents(shares) === input.totalCents,
+      422,
+      'SHARES_MISMATCH',
+      'Las partes con impuesto y propina no suman el total',
+    );
 
     const selected = new Set(participantIds);
     this.validateAllocations(input.payers, selected, input.totalCents, 'PAYERS_MISMATCH');
     if (input.items) {
       assertExactTotal(
-        input.totalCents,
+        subtotalCents,
         input.items.map((expenseItem) => expenseItem.amountCents),
         'ITEMS_MISMATCH',
       );
@@ -122,7 +218,7 @@ export class ExpensesService {
       }
       participantIds.forEach((id, index) =>
         ensure(
-          allocatedByParticipant.get(id) === shares[index],
+          (allocatedByParticipant.get(id) ?? 0) === subtotalShares[index],
           422,
           'ITEM_SHARES_MISMATCH',
           'Los items no coinciden con las partes del gasto',
@@ -137,11 +233,17 @@ export class ExpensesService {
       ...(input.notes ? { notes: input.notes } : {}),
       ...(input.categoryId ? { categoryId: input.categoryId } : {}),
       totalCents: input.totalCents,
+      subtotalCents,
+      taxCents,
+      tipCents,
       currency: input.currency,
       splitMode: input.splitMode as SplitMode,
       occurredAt: input.occurredAt,
       participants: participantIds.map((eventParticipantId, index) => ({
         eventParticipantId,
+        subtotalCents: subtotalShares[index]!,
+        taxCents: taxShares[index]!,
+        tipCents: tipShares[index]!,
         shareCents: shares[index]!,
       })),
       payers: input.payers,

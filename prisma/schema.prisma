@@ -32,6 +32,7 @@ enum EventStatus {
 enum SplitMode {
   EQUAL
   EXACT
+  PERCENT
 }
 
 enum OcrJobStatus {
@@ -322,6 +323,9 @@ model Expense {
   title            String               @db.VarChar(160)
   notes            String?              @db.VarChar(1000)
   totalCents       Int
+  subtotalCents    Int                  @default(0)
+  taxCents         Int                  @default(0)
+  tipCents         Int                  @default(0)
   currency         String               @db.Char(3)
   splitMode        SplitMode
   occurredAt       DateTime
@@ -347,13 +351,16 @@ model Expense {
   @@index([categoryId])
 }
 
-/// Parte exacta de un participante; el servicio exige shareCents > 0 y suma igual al gasto.
+/// Desglose exacto de un participante; la suma de sus tres componentes es shareCents.
 model ExpenseParticipant {
   id                 String                  @id @default(uuid()) @db.Uuid
   expenseId          String                  @db.Uuid
   eventParticipantId String                  @db.Uuid
   /// Copia consultable de EventParticipant.groupMemberId, fijada por el repositorio al crear el gasto.
   groupMemberId      String?                 @db.Uuid
+  subtotalCents      Int                     @default(0)
+  taxCents           Int                     @default(0)
+  tipCents           Int                     @default(0)
   shareCents         Int
   expense            Expense                 @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   eventParticipant   EventParticipant        @relation(fields: [eventParticipantId], references: [id], onDelete: Restrict)

@@ -3085,8 +3085,25 @@ components:
         title: { type: string, minLength: 1, maxLength: 160 }
         notes: { type: string, maxLength: 1000 }
         totalCents: { type: integer, minimum: 1, maximum: 2147483647 }
+        subtotalCents: { type: integer, minimum: 1, maximum: 2147483647 }
+        taxCents: { type: integer, minimum: 0, maximum: 2147483647 }
+        taxPercentBps:
+          {
+            type: integer,
+            minimum: 0,
+            maximum: 10000,
+            description: 'Porcentaje del subtotal en puntos básicos; el servidor redondea mitad hacia arriba.',
+          }
+        tipCents: { type: integer, minimum: 0, maximum: 2147483647 }
+        tipPercentBps:
+          {
+            type: integer,
+            minimum: 0,
+            maximum: 10000,
+            description: 'Porcentaje del subtotal en puntos básicos; el servidor redondea mitad hacia arriba.',
+          }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
-        splitMode: { enum: [EQUAL, EXACT] }
+        splitMode: { enum: [EQUAL, EXACT, PERCENT] }
         occurredAt: { type: string, format: date-time }
         participants:
           type: array
@@ -3101,6 +3118,7 @@ components:
                 {
                   eventParticipantId: { type: string, format: uuid },
                   shareCents: { type: integer, minimum: 1, maximum: 2147483647 },
+                  percentageBps: { type: integer, minimum: 0, maximum: 10000 },
                 },
             }
         payers:
@@ -3131,14 +3149,31 @@ components:
                 }
     ExpenseSummary:
       type: object
-      required: [id, eventId, title, totalCents, currency, splitMode, occurredAt, createdAt, _count]
+      required:
+        [
+          id,
+          eventId,
+          title,
+          totalCents,
+          subtotalCents,
+          taxCents,
+          tipCents,
+          currency,
+          splitMode,
+          occurredAt,
+          createdAt,
+          _count,
+        ]
       properties:
         id: { type: string, format: uuid }
         eventId: { type: string, format: uuid }
         title: { type: string }
         totalCents: { type: integer }
+        subtotalCents: { type: integer, minimum: 0 }
+        taxCents: { type: integer, minimum: 0 }
+        tipCents: { type: integer, minimum: 0 }
         currency: { type: string }
-        splitMode: { enum: [EQUAL, EXACT] }
+        splitMode: { enum: [EQUAL, EXACT, PERCENT] }
         occurredAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         _count:
@@ -3165,6 +3200,9 @@ components:
           title,
           notes,
           totalCents,
+          subtotalCents,
+          taxCents,
+          tipCents,
           currency,
           splitMode,
           occurredAt,
@@ -3180,8 +3218,11 @@ components:
         title: { type: string }
         notes: { type: [string, 'null'] }
         totalCents: { type: integer }
+        subtotalCents: { type: integer, minimum: 0 }
+        taxCents: { type: integer, minimum: 0 }
+        tipCents: { type: integer, minimum: 0 }
         currency: { type: string }
-        splitMode: { enum: [EQUAL, EXACT] }
+        splitMode: { enum: [EQUAL, EXACT, PERCENT] }
         occurredAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         participants:
@@ -3190,11 +3231,23 @@ components:
             items:
               {
                 type: object,
-                required: [id, eventParticipantId, shareCents, eventParticipant],
+                required:
+                  [
+                    id,
+                    eventParticipantId,
+                    subtotalCents,
+                    taxCents,
+                    tipCents,
+                    shareCents,
+                    eventParticipant,
+                  ],
                 properties:
                   {
                     id: { type: string, format: uuid },
                     eventParticipantId: { type: string, format: uuid },
+                    subtotalCents: { type: integer, minimum: 0 },
+                    taxCents: { type: integer, minimum: 0 },
+                    tipCents: { type: integer, minimum: 0 },
                     shareCents: { type: integer },
                     eventParticipant:
                       {
