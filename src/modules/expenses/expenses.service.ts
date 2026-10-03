@@ -9,7 +9,7 @@ import {
 } from '../../shared/expense-splitting.js';
 import type { GroupsService } from '../groups/groups.service.js';
 import type { DomainEvents } from '../../shared/events.js';
-import type { CreateExpenseInput } from './expenses.schema.js';
+import type { CreateExpenseInput, GroupExpenseQuery } from './expenses.schema.js';
 import type { ExpensesRepository, PreparedExpense } from './expenses.repository.js';
 
 /** Invariantes de reparto y reglas de ciclo de vida de gastos. */
@@ -55,6 +55,14 @@ export class ExpensesService {
     );
     assertCurrency(input.currency);
     if (input.categoryId) await this.groups.assertCategory(groupId, input.categoryId);
+    const tagIds = input.tagIds ?? [];
+    ensure(
+      new Set(tagIds).size === tagIds.length,
+      422,
+      'DUPLICATE_TAG',
+      'Hay etiquetas duplicadas',
+    );
+    if (tagIds.length > 0) await this.groups.assertTags(groupId, tagIds);
     ensure(
       input.currency === context.group.currency,
       422,
@@ -248,6 +256,7 @@ export class ExpensesService {
       })),
       payers: input.payers,
       items: input.items ?? [],
+      tagIds,
     };
     try {
       const result = await this.repository.createAtomic({
@@ -283,6 +292,9 @@ export class ExpensesService {
           'Un participante no pertenece al evento',
         );
       }
+      if (error instanceof Error && error.message === 'TAG_OUTSIDE_GROUP') {
+        throw new AppError(422, 'TAG_OUTSIDE_GROUP', 'Una etiqueta no pertenece al grupo');
+      }
       if (error instanceof Error) {
         const ocrErrors: Record<string, [number, string, string]> = {
           OCR_JOB_NOT_FOUND: [404, 'OCR_JOB_NOT_FOUND', 'Trabajo OCR no encontrado'],
@@ -316,13 +328,19 @@ export class ExpensesService {
     }
   }
 
-  async list(userId: string, groupId: string) {
+  async list(userId: string, groupId: string, query: GroupExpenseQuery = {}) {
     await this.groups.requireRole(userId, groupId, [
       GroupRole.OWNER,
       GroupRole.ADMIN,
       GroupRole.MEMBER,
     ]);
-    return this.repository.list(groupId);
+    return this.repository.list(groupId, {
+      ...(query.tagId ? { tagId: query.tagId } : {}),
+      ...(query.categoryId ? { categoryId: query.categoryId } : {}),
+      ...(query.text ? { text: query.text } : {}),
+      ...(query.from ? { from: new Date(query.from) } : {}),
+      ...(query.to ? { to: new Date(query.to) } : {}),
+    });
   }
 
   async detail(userId: string, groupId: string, expenseId: string) {

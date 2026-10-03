@@ -196,9 +196,12 @@ export class StatisticsService {
     const groupIds = memberships.map((membership) => membership.groupId);
     const myMembers = new Set(memberships.map((membership) => membership.id));
     const baseWhere = {
-      groupId: { in: groupIds },
-      occurredAt: { gte: from, lt: to },
-      ...(query.eventId ? { eventId: query.eventId } : {}),
+      AND: [
+        query.groupId || query.eventId
+          ? { groupId: { in: groupIds }, ...(query.eventId ? { eventId: query.eventId } : {}) }
+          : { OR: [{ ownerUserId: userId }, { groupId: { in: groupIds } }] },
+        { occurredAt: { gte: from, lt: to } },
+      ],
     };
     const currencies = await this.db.expense.groupBy({
       by: ['currency'],
@@ -241,6 +244,7 @@ export class StatisticsService {
         tipCents: true,
         occurredAt: true,
         groupId: true,
+        ownerUserId: true,
         event: { select: { id: true, name: true } },
         category: { select: { id: true, name: true, color: true } },
         participants: {
@@ -306,16 +310,23 @@ export class StatisticsService {
       category.totalCents += expense.totalCents;
       category.count += 1;
       byCategory.set(categoryKey, category);
-      add(byGroup, expense.groupId, expense.totalCents);
-      const event = byEvent.get(expense.event.id) ?? {
-        name: expense.event.name,
-        groupId: expense.groupId,
-        totalCents: 0,
-        count: 0,
-      };
-      event.totalCents += expense.totalCents;
-      event.count += 1;
-      byEvent.set(expense.event.id, event);
+      if (expense.groupId) {
+        add(byGroup, expense.groupId, expense.totalCents);
+        if (expense.event) {
+          const event = byEvent.get(expense.event.id) ?? {
+            name: expense.event.name,
+            groupId: expense.groupId,
+            totalCents: 0,
+            count: 0,
+          };
+          event.totalCents += expense.totalCents;
+          event.count += 1;
+          byEvent.set(expense.event.id, event);
+        }
+      } else {
+        myShare += expense.totalCents;
+        myPaid += expense.totalCents;
+      }
       const period = trend.get(periodKey(expense.occurredAt)) ?? { totalCents: 0, myShareCents: 0 };
       period.totalCents += expense.totalCents;
       for (const participant of expense.participants) {
@@ -328,7 +339,7 @@ export class StatisticsService {
         const user = participant.eventParticipant.groupMember?.user;
         const key = user
           ? `u:${user.id}`
-          : `g:${expense.groupId}:${participant.eventParticipant.guestName ?? ''}`;
+          : `g:${expense.groupId ?? 'unknown'}:${participant.eventParticipant.guestName ?? ''}`;
         const person = byPerson.get(key) ?? {
           userId: user?.id ?? null,
           displayName: user?.displayName ?? participant.eventParticipant.guestName ?? 'Invitado',

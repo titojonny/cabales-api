@@ -25,6 +25,8 @@ import type { BudgetsService } from '../modules/budgets/budgets.service.js';
 import { createBudgetsRouter } from '../modules/budgets/budgets.router.js';
 import type { CabudasService } from '../modules/cabudas/cabudas.service.js';
 import { createCabudasRouter } from '../modules/cabudas/cabudas.router.js';
+import type { PersonalCategoriesService } from '../modules/categories/categories.service.js';
+import { createPersonalCategoriesRouter } from '../modules/categories/categories.router.js';
 import type { DocumentsService } from '../modules/documents/documents.service.js';
 import {
   createDocumentsRouter,
@@ -34,6 +36,8 @@ import type { EventsService } from '../modules/events/events.service.js';
 import { createEventsRouter } from '../modules/events/events.router.js';
 import type { ExpensesService } from '../modules/expenses/expenses.service.js';
 import { createExpensesRouter } from '../modules/expenses/expenses.router.js';
+import type { PersonalExpensesService } from '../modules/expenses/personal-expenses.service.js';
+import { createPersonalExpensesRouter } from '../modules/expenses/personal-expenses.router.js';
 import type { FundsService } from '../modules/funds/funds.service.js';
 import { createFundsRouter } from '../modules/funds/funds.router.js';
 import type { GroupsService } from '../modules/groups/groups.service.js';
@@ -48,6 +52,10 @@ import type { SettlementsService } from '../modules/settlements/settlements.serv
 import { createSettlementsRouter } from '../modules/settlements/settlements.router.js';
 import type { StatisticsService } from '../modules/statistics/statistics.service.js';
 import { createStatisticsRouter } from '../modules/statistics/statistics.router.js';
+import type { RecurringExpensesService } from '../modules/recurring-expenses/recurring-expenses.service.js';
+import { createGroupRecurringRouter, createPersonalRecurringRouter } from '../modules/recurring-expenses/recurring-expenses.router.js';
+import type { TagsService } from '../modules/tags/tags.service.js';
+import { createGroupTagsRouter, createPersonalTagsRouter } from '../modules/tags/tags.router.js';
 import {
   errorHandler,
   notFound,
@@ -66,6 +74,10 @@ export interface AppDependencies {
   groups: GroupsService;
   events: EventsService;
   expenses: ExpensesService;
+  personalExpenses?: PersonalExpensesService;
+  personalCategories?: PersonalCategoriesService;
+  recurringExpenses?: RecurringExpensesService;
+  tags?: TagsService;
   settlements: SettlementsService;
   readiness: () => Promise<boolean>;
   rateLimitStores?: RateLimitStoreFactory;
@@ -231,6 +243,20 @@ export function createApp(dependencies: AppDependencies): Express {
   authenticated.use(protectMutations(config.COOKIE_NAME));
   const userLimit = (name: string, max: number, message: string): RequestHandler =>
     limit(name, max, 'user', message);
+  if (dependencies.personalExpenses) {
+    authenticated.use(
+      '/expenses',
+      createPersonalExpensesRouter(
+        dependencies.personalExpenses,
+        userLimit('personal-expenses', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiados gastos; espera un momento'),
+      ),
+    );
+  }
+  if (dependencies.personalCategories)
+    authenticated.use('/categories', createPersonalCategoriesRouter(dependencies.personalCategories, userLimit('personal-categories', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas categorias; espera un momento')));
+  if (dependencies.recurringExpenses)
+    authenticated.use('/recurring-expenses', createPersonalRecurringRouter(dependencies.recurringExpenses, userLimit('personal-recurring', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas recurrencias; espera un momento')));
+  if (dependencies.tags) authenticated.use('/tags', createPersonalTagsRouter(dependencies.tags, userLimit('personal-tags', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas etiquetas; espera un momento')));
   authenticated.use(
     '/groups',
     createGroupsRouter(dependencies.groups, {
@@ -241,6 +267,10 @@ export function createApp(dependencies: AppDependencies): Express {
       ),
     }),
   );
+  if (dependencies.tags)
+    authenticated.use('/groups/:groupId/tags', createGroupTagsRouter(dependencies.tags, userLimit('group-tags', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas etiquetas; espera un momento')));
+  if (dependencies.recurringExpenses)
+    authenticated.use('/groups/:groupId/recurring-expenses', createGroupRecurringRouter(dependencies.recurringExpenses, userLimit('group-recurring', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas recurrencias; espera un momento')));
   authenticated.use(
     '/groups/:groupId/events',
     createEventsRouter(dependencies.events, {

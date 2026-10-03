@@ -12,6 +12,7 @@ export const NOTIFICATION_TYPES = [
   'privacy.updated',
   'achievement.unlocked',
   'event.reminder',
+  'recurring.expense',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

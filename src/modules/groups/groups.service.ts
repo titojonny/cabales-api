@@ -263,6 +263,15 @@ export class GroupsService {
     );
   }
 
+  async assertTags(groupId: string, tagIds: string[]) {
+    ensure(
+      (await this.repository.tagsInGroup(groupId, tagIds)).length === tagIds.length,
+      422,
+      'TAG_OUTSIDE_GROUP',
+      'Una etiqueta no pertenece al grupo',
+    );
+  }
+
   /** Aplica mínimo privilegio y devuelve la membresía para validaciones de contexto. */
   async requireRole(
     userId: string,

@@ -58,6 +58,7 @@ export const createExpenseSchema = z
       .min(1)
       .max(500)
       .optional(),
+    tagIds: z.array(z.string().uuid()).max(10).optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -79,3 +80,56 @@ export const createExpenseSchema = z
 
 /** Gasto estructuralmente válido pendiente de comprobar sus sumas. */
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
+
+export const createPersonalExpenseSchema = z
+  .object({
+    title: z.string().trim().min(1).max(160),
+    notes: z.string().trim().max(1000).optional(),
+    categoryId: z.string().uuid().optional(),
+    tagIds: z.array(z.string().uuid()).max(10).optional(),
+    totalCents: cents,
+    currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+    occurredAt: dateTime,
+  })
+  .strict();
+
+export const updatePersonalExpenseSchema = createPersonalExpenseSchema
+  .partial()
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, 'Debes enviar al menos un campo');
+
+export const expenseHistoryQuerySchema = z
+  .object({
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    categoryId: z.string().uuid().optional(),
+    tagId: z.string().uuid().optional(),
+    groupId: z.string().uuid().optional(),
+    text: z.string().trim().max(120).optional(),
+    scope: z.enum(['ALL', 'PERSONAL', 'GROUPS']).default('ALL'),
+    cursor: z.string().uuid().optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(30),
+  })
+  .strict();
+
+export type CreatePersonalExpenseInput = z.infer<typeof createPersonalExpenseSchema>;
+export type UpdatePersonalExpenseInput = z.infer<typeof updatePersonalExpenseSchema>;
+export type ExpenseHistoryQuery = z.infer<typeof expenseHistoryQuerySchema>;
+
+export const groupExpenseQuerySchema = z
+  .object({
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    categoryId: z.string().uuid().optional(),
+    tagId: z.string().uuid().optional(),
+    text: z.string().trim().max(120).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.from && value.to && new Date(value.from) >= new Date(value.to)) {
+      context.addIssue({ code: 'custom', path: ['to'], message: 'to debe ser posterior a from' });
+    }
+  });
+
+export type GroupExpenseQuery = z.infer<typeof groupExpenseQuerySchema>;

@@ -224,6 +224,7 @@ export class AchievementsService {
       case 'group.created':
       case 'event.created':
       case 'expense.created':
+      case 'personal-expense.created':
       case 'settlement.created':
         await this.evaluate(event.userId);
         return;

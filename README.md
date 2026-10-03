@@ -300,6 +300,16 @@ La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contr
 - `NotificationsService` conserva la deduplicación por usuario y `dedupeKey` incluso cuando la preferencia in-app está apagada: crea un registro archivado como marcador antes de correo o push.
 - Los adaptadores locales siguen sin datos ficticios y no se usan para recordatorios; el planificador consulta solo PostgreSQL y los canales configurados.
 
+## P4: gastos personales, recurrentes, etiquetas e historial
+
+Las categorias personales se sirven en `GET|POST /categories` y se pueden editar o eliminar solo por su propietario. Las etiquetas admiten tambien `PATCH` dentro de su alcance. Los gastos personales quedan fuera de grupos, liquidaciones, cabudas y estadisticas grupales; el borrado ARCO y la exportacion incluyen sus datos propios.
+
+La migración `20261004010000_p4_gastos_personales_recurrentes_etiquetas` permite gastos sin grupo ni evento, siempre ligados a `ownerUserId`. Las rutas personales son `GET|POST /expenses`, `GET|PATCH|DELETE /expenses/:expenseId`, `GET|POST /tags` y `GET|POST /recurring-expenses`; las rutas grupales añadidas son `/groups/:groupId/tags` y `/groups/:groupId/recurring-expenses`. El historial acepta `month`, `from`, `to`, `categoryId`, `tagId`, `groupId`, `text`, `scope`, `cursor` y `limit`, y devuelve la suma filtrada en `meta.total`.
+
+El job `recurring-expenses` reutiliza el planificador P3. Cada ejecución usa una clave de periodo única en `Expense`, bloquea el recurrente y pausa con notificación si el evento grupal está cerrado o la plantilla dejó de ser válida. No hay variables de entorno nuevas.
+
 ## Principios aplicados
+
+El contrato OpenAPI de P4 se comprueba contra todas las operaciones montadas, incluidos los routers personales separados y las acciones de pausa, reanudacion y borrado de recurrentes. No se documentan rutas personales que no esten montadas.
 
 Se aplican SRP y separación de validación, negocio y persistencia; zero trust en body, parámetros, cookies y cabeceras; mínimo privilegio RBAC; atomicidad y aislamiento serializable; request/correlation ID; fallos seguros y mensajes controlados; health/readiness separados; logs sin secretos; y algoritmos puros, deterministas y verificables para dinero y liquidación.
