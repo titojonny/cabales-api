@@ -109,6 +109,7 @@ const envSchema = z.object({
   VAPID_SUBJECT: optionalString,
   STATISTICS_EXPORT_MAX_ROWS: z.coerce.number().int().min(1).max(10_000).default(1000),
   STATISTICS_EXPORT_RATE_LIMIT_MAX: positiveInt.default(10),
+  INCOME_RATE_LIMIT_MAX: positiveInt.default(60),
   // Privacidad y retención (días). Los valores legales definitivos los decide el responsable.
   PRIVACY_EXPORT_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(7),
   RETENTION_TOKEN_DAYS: z.coerce.number().int().min(1).max(3650).default(7),

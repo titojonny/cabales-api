@@ -171,6 +171,7 @@ model User {
   requestedOcrJobs        OcrJob[]                 @relation("OcrJobRequester")
   createdBudgets          Budget[]                 @relation("BudgetCreator")
   notificationPreferences NotificationPreference[]
+  incomes                 Income[]
 }
 
 /// Credencial desacoplada para permitir otros proveedores sin contaminar User.
@@ -664,6 +665,23 @@ model RecurringExpense {
 
   @@index([groupId, isActive])
   @@index([nextRunAt, isActive])
+}
+
+/// Ingreso personal independiente de grupos, gastos compartidos y documentos.
+model Income {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  amountCents Int
+  date        DateTime
+  category    String   @db.VarChar(80)
+  note        String?  @db.VarChar(500)
+  currency    String   @db.Char(3)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@index([userId, currency, date])
 }
 
 model Document {

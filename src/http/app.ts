@@ -40,6 +40,8 @@ import type { GroupsService } from '../modules/groups/groups.service.js';
 import { createGroupsRouter } from '../modules/groups/groups.router.js';
 import type { NotificationsService } from '../modules/notifications/notifications.service.js';
 import { createNotificationsRouter } from '../modules/notifications/notifications.router.js';
+import type { IncomesService } from '../modules/incomes/incomes.service.js';
+import { createIncomesRouter } from '../modules/incomes/incomes.router.js';
 import type { OcrService } from '../modules/ocr/ocr.service.js';
 import { createOcrRouter } from '../modules/ocr/ocr.router.js';
 import type { PrivacyService } from '../modules/privacy/privacy.service.js';
@@ -79,6 +81,7 @@ export interface AppDependencies {
   statistics?: StatisticsService;
   notifications?: NotificationsService;
   achievements?: AchievementsService;
+  incomes?: IncomesService;
 }
 
 function protectMutations(cookieName: string) {
@@ -317,6 +320,12 @@ export function createApp(dependencies: AppDependencies): Express {
         ),
         config.STATISTICS_EXPORT_MAX_ROWS,
       ),
+    );
+  if (dependencies.incomes)
+    authenticated.use(
+      '/incomes',
+      userLimit('incomes', config.INCOME_RATE_LIMIT_MAX, 'Demasiadas operaciones de ingresos'),
+      createIncomesRouter(dependencies.incomes),
     );
   if (dependencies.notifications) {
     const pushSubscriptionLimit = userLimit(
