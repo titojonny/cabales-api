@@ -326,7 +326,103 @@ paths:
         '200': { $ref: '#/components/responses/EventDetailSuccess' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    patch:
+      tags: [Events]
+      summary: Edita los datos del evento
+      operationId: updateEvent
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/EventId'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EventPatch' }
+      responses:
+        '200': { $ref: '#/components/responses/EventDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Events]
+      summary: Elimina un evento sin actividad financiera
+      operationId: deleteEvent
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/EventId'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      responses:
+        '204': { description: Evento eliminado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/events/{eventId}/cancel:
+    post:
+      tags: [Events]
+      summary: Cancela un evento
+      operationId: cancelEvent
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/EventId'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/EventDetailSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/events/{eventId}/rsvp:
+    put:
+      tags: [Events]
+      summary: Responde el RSVP propio
+      operationId: respondEventRsvp
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/EventId'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EventRsvpInput' }
+      responses:
+        '200': { $ref: '#/components/responses/EventDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/events/{eventId}/reminders:
+    put:
+      tags: [Events]
+      summary: Reemplaza recordatorios de un evento
+      operationId: replaceEventReminders
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/EventId'
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EventRemindersInput' }
+      responses:
+        '200': { $ref: '#/components/responses/EventDetailSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/groups/{groupId}/expenses:
     parameters:
@@ -2953,23 +3049,46 @@ components:
       properties: { success: { const: true }, data: { $ref: '#/components/schemas/Membership' } }
     EventBase:
       type: object
-      required: [id, groupId, name, description, startsAt, status, createdAt]
+      required:
+        [
+          id,
+          groupId,
+          name,
+          description,
+          startsAt,
+          endsAt,
+          locationName,
+          locationAddress,
+          mapsUrl,
+          timeZone,
+          status,
+          createdById,
+          createdAt,
+        ]
       properties:
         id: { type: string, format: uuid }
         groupId: { type: string, format: uuid }
         name: { type: string }
         description: { type: [string, 'null'] }
         startsAt: { type: string, format: date-time }
+        endsAt: { type: [string, 'null'], format: date-time }
+        locationName: { type: [string, 'null'] }
+        locationAddress: { type: [string, 'null'] }
+        mapsUrl: { type: [string, 'null'], format: uri, pattern: '^https://' }
+        timeZone: { type: [string, 'null'] }
         status: { enum: [OPEN, CLOSED, CANCELLED] }
+        createdById: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
     EventParticipant:
       type: object
-      required: [id]
+      required: [id, rsvpStatus, respondedAt]
       properties:
         id: { type: string, format: uuid }
         groupMemberId: { type: [string, 'null'], format: uuid }
         guestName: { type: [string, 'null'] }
         groupMember: { type: [object, 'null'] }
+        rsvpStatus: { enum: [PENDING, GOING, MAYBE, DECLINED] }
+        respondedAt: { type: [string, 'null'], format: date-time }
     EventEnvelope:
       type: object
       required: [success, data]
@@ -3002,7 +3121,7 @@ components:
           allOf:
             - $ref: '#/components/schemas/EventBase'
             - type: object
-              required: [participants, links, settlement, _count]
+              required: [participants, links, reminders, rsvpCounts, settlement, _count]
               properties:
                 participants:
                   { type: array, items: { $ref: '#/components/schemas/EventParticipant' } }
@@ -3021,6 +3140,24 @@ components:
                           },
                       },
                   }
+                reminders:
+                  type: array
+                  maxItems: 5
+                  items:
+                    type: object
+                    required: [id, minutesBefore, enabled]
+                    properties:
+                      id: { type: string, format: uuid }
+                      minutesBefore: { type: integer, minimum: 1, maximum: 525600 }
+                      enabled: { type: boolean }
+                rsvpCounts:
+                  type: object
+                  required: [PENDING, GOING, MAYBE, DECLINED]
+                  properties:
+                    PENDING: { type: integer, minimum: 0 }
+                    GOING: { type: integer, minimum: 0 }
+                    MAYBE: { type: integer, minimum: 0 }
+                    DECLINED: { type: integer, minimum: 0 }
                 settlement:
                   oneOf:
                     - type: 'null'
@@ -3044,6 +3181,11 @@ components:
         name: { type: string, minLength: 2, maxLength: 160 }
         description: { type: string, maxLength: 1000 }
         startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        locationName: { type: [string, 'null'], maxLength: 160 }
+        locationAddress: { type: [string, 'null'], maxLength: 500 }
+        mapsUrl: { type: [string, 'null'], format: uri, pattern: '^https://' }
+        timeZone: { type: [string, 'null'], maxLength: 80 }
         memberIds:
           { type: array, maxItems: 100, default: [], items: { type: string, format: uuid } }
         guests:
@@ -3066,6 +3208,50 @@ components:
                 label: { type: string, minLength: 1, maxLength: 80 },
                 url: { type: string, format: uri, maxLength: 2048, pattern: '^https?://' },
               }
+    EventPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 2, maxLength: 160 }
+        description: { type: [string, 'null'], maxLength: 1000 }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: [string, 'null'], format: date-time }
+        locationName: { type: [string, 'null'], maxLength: 160 }
+        locationAddress: { type: [string, 'null'], maxLength: 500 }
+        mapsUrl: { type: [string, 'null'], format: uri, pattern: '^https://' }
+        timeZone: { type: [string, 'null'], maxLength: 80 }
+        links:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: false
+            required: [label, url]
+            properties:
+              label: { type: string, minLength: 1, maxLength: 80 }
+              url: { type: string, format: uri, pattern: '^https?://' }
+    EventRsvpInput:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { enum: [PENDING, GOING, MAYBE, DECLINED] }
+    EventRemindersInput:
+      type: object
+      additionalProperties: false
+      required: [reminders]
+      properties:
+        reminders:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            additionalProperties: false
+            required: [minutesBefore]
+            properties:
+              minutesBefore: { type: integer, minimum: 1, maximum: 525600 }
+              enabled: { type: boolean, default: true }
     AllocationInput:
       type: object
       additionalProperties: false
@@ -4576,6 +4762,7 @@ components:
               ocr.finished,
               privacy.updated,
               achievement.unlocked,
+              event.reminder,
             ]
         title:
           type: string
@@ -4611,6 +4798,7 @@ components:
               ocr.finished,
               privacy.updated,
               achievement.unlocked,
+              event.reminder,
             ]
         inApp:
           type: boolean

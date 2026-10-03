@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config/env.js';
 import { loginSchema } from '../src/modules/auth/auth.schema.js';
-import { createEventSchema } from '../src/modules/events/events.schema.js';
+import {
+  createEventSchema,
+  eventRemindersSchema,
+  updateEventSchema,
+} from '../src/modules/events/events.schema.js';
 
 describe('contratos Zod estrictos', () => {
   it('rechaza propiedades no declaradas', () => {
@@ -37,6 +41,29 @@ describe('contratos Zod estrictos', () => {
       createEventSchema.safeParse({
         ...event,
         links: [{ label: 'Script', url: 'javascript:alert(1)' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('valida rango, Maps HTTPS y el límite de cinco recordatorios', () => {
+    const valid = createEventSchema.safeParse({
+      name: 'Viaje',
+      startsAt: '2026-08-21T12:00:00.000Z',
+      endsAt: '2026-08-21T13:00:00.000Z',
+      mapsUrl: 'https://maps.google.com/?q=Cabales',
+    });
+    expect(valid.success).toBe(true);
+    expect(
+      createEventSchema.safeParse({
+        name: 'Viaje',
+        startsAt: '2026-08-21T12:00:00.000Z',
+        endsAt: '2026-08-21T11:00:00.000Z',
+      }).success,
+    ).toBe(false);
+    expect(updateEventSchema.safeParse({ mapsUrl: 'http://maps.google.com' }).success).toBe(false);
+    expect(
+      eventRemindersSchema.safeParse({
+        reminders: [1, 2, 3, 4, 5, 6].map((minutesBefore) => ({ minutesBefore })),
       }).success,
     ).toBe(false);
   });

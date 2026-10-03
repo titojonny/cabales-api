@@ -36,6 +36,7 @@ const DEFAULTS: Record<NotificationType, { inApp: boolean; email: boolean; push:
   'ocr.finished': { inApp: true, email: false, push: false },
   'privacy.updated': { inApp: true, email: true, push: false },
   'achievement.unlocked': { inApp: true, email: false, push: false },
+  'event.reminder': { inApp: true, email: false, push: false },
 };
 
 export interface NotifyInput {
@@ -81,7 +82,10 @@ export class NotificationsService {
       });
       if (!user?.isActive) continue;
       const preference = (await this.preferences(userId)).find((item) => item.type === input.type)!;
-      if (preference.inApp) {
+      // Con dedupeKey se persiste también un marcador archivado cuando la persona
+      // desactivó in-app; así correo y push no se repiten en cada tick del planificador.
+      const shouldPersistDedupe = Boolean(input.dedupeKey);
+      if (preference.inApp || shouldPersistDedupe) {
         try {
           await this.db.notification.create({
             data: {
@@ -89,11 +93,14 @@ export class NotificationsService {
               type: input.type,
               title: input.title.slice(0, 160),
               body: input.body.slice(0, 1000),
+              ...(preference.inApp
+                ? {}
+                : { status: NotificationStatus.ARCHIVED, archivedAt: new Date() }),
               ...(input.data ? { data: input.data } : {}),
               ...(input.dedupeKey ? { dedupeKey: input.dedupeKey } : {}),
             },
           });
-          created += 1;
+          if (preference.inApp) created += 1;
         } catch (error) {
           if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
             continue;

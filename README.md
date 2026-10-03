@@ -1,5 +1,13 @@
 # Cabales API
 
+## P3: eventos, RSVP y recordatorios
+
+Los eventos admiten edición parcial (`PATCH /groups/:groupId/events/:eventId`) de nombre, descripción, inicio/fin, ubicación, Maps HTTPS, zona horaria y enlaces. La fecha final debe ser igual o posterior al inicio. La persona creadora o `OWNER`/`ADMIN` puede editar, cancelar y configurar recordatorios; eliminar solo es posible cuando no existen gastos ni liquidación y devuelve `409 EVENT_HAS_FINANCIAL_ACTIVITY` en caso contrario.
+
+Cada miembro participante responde únicamente por sí mismo en `PUT .../rsvp` con `PENDING|GOING|MAYBE|DECLINED`. El detalle devuelve `respondedAt`, participantes agrupables por estado y `rsvpCounts`; el ID de participante nunca se acepta como identidad del actor.
+
+`PUT .../reminders` reemplaza hasta cinco intervalos en minutos. El planificador de `src/infrastructure/scheduler.ts` ejecuta `event-reminders`, usa `SET NX` con expiración cuando Redis está activo y `pg_try_advisory_xact_lock` como fallback. `ScheduledJobRun` conserva la clave de ventana, intentos y resultado; las notificaciones usan `event.reminder` y `dedupeKey`, incluyendo un marcador archivado cuando in-app está desactivado para evitar duplicar correo o push. `SCHEDULER_ENABLED=false` lo desactiva; en desarrollo el valor por defecto es `true`. En producción debe permanecer `true` al menos en una instancia y `RATE_LIMIT_STORE=redis` comparte el lock entre instancias.
+
 API REST de Cabales para registrar grupos y eventos, dividir gastos manuales en centavos, producir liquidaciones verificables y operar fondos, presupuestos, documentos, OCR asistido, Cabudas, estadísticas, avisos, logros y derechos de privacidad. Es un monolito modular en Express, TypeScript, Prisma 7 y PostgreSQL.
 
 ## P2: reparto porcentual e importes adicionales
@@ -120,6 +128,7 @@ pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema
 - `COOKIE_NAME`: nombre de la cookie HttpOnly.
 - `RATE_LIMIT_STORE` (`memory`|`redis`) y `REDIS_URL`: store de límites; producción exige Redis compartido y el arranque falla sin él. Si Redis cae, los límites sensibles fallan cerrados (503) y el global deja pasar.
 - `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `EXPENSE_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario) y `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario).
+- `SCHEDULER_ENABLED`, `SCHEDULER_INTERVAL_SECONDS`, `SCHEDULER_LOCK_TTL_SECONDS` y `SCHEDULER_MAX_ATTEMPTS`: habilitación, frecuencia, TTL del lock y reintentos acotados del planificador. En producción no se debe desactivar el job de recordatorios.
 - `APP_ORIGIN` y `PUBLIC_API_ORIGIN`: bases de enlaces de correo y de URLs firmadas.
 - `EMAIL_VERIFICATION_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`, `INVITATION_TTL_DAYS`: vigencia de enlaces de un solo uso.
 - `EMAIL_PROVIDER` (`logging`|`http`), `EMAIL_FROM`, `EMAIL_HTTP_URL`, `EMAIL_HTTP_API_KEY`: correo transaccional; `logging` no envía ni registra contenido.
@@ -173,6 +182,7 @@ Endpoints autenticados:
 - `GET|POST /api/v1/groups/:groupId/categories`, `DELETE .../categories/:categoryId`
 - `POST|GET /api/v1/groups/:groupId/events`
 - `GET /api/v1/groups/:groupId/events/:eventId`
+- `PATCH|DELETE /api/v1/groups/:groupId/events/:eventId`, `POST .../:eventId/cancel`, `PUT .../:eventId/rsvp` y `PUT .../:eventId/reminders`
 - `POST|GET /api/v1/groups/:groupId/expenses`
 - `GET /api/v1/groups/:groupId/expenses/:expenseId`
 - `POST|GET /api/v1/groups/:groupId/settlements`
@@ -272,7 +282,7 @@ La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contr
 
 ## Límites actuales
 
-- Gastos recurrentes, etiquetas y enlaces de evento siguen modelados sin endpoints.
+- Gastos recurrentes y etiquetas siguen modelados sin endpoints; los enlaces de evento se gestionan dentro de la ediciÃ³n P3.
 - Proveedores reales pendientes de decisión: correo (`http` compatible con Resend; SMTP no implementado). S3 compatible y Web Push/VAPID ya están disponibles por configuración; OCR `local` sigue reservado a desarrollo/pruebas.
 - Los plazos `RETENTION_*_DAYS` y `PRIVACY_EXPORT_TTL_DAYS` son provisionales hasta validación legal. Rectificación y oposición quedan `IN_PROGRESS` para atención manual.
 - No hay edición ni borrado de gastos financieros; al cerrar el evento quedan inmutables por diseño.
@@ -283,6 +293,12 @@ La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contr
 - Los bloqueos `FOR UPDATE`/`FOR SHARE`, carreras de FK y colisiones únicas se implementan para PostgreSQL, pero requieren una prueba de concurrencia contra una base aislada que no se ejecutó en esta tarea.
 - `pnpm-lock.yaml` es el único lockfile canónico; `package-lock.json` se eliminó para no mantener dos árboles de dependencias divergentes. Se excluyen `node_modules`, `dist`, cobertura y Prisma Client generado.
 - Las migraciones versionadas viven en `prisma/migrations`; `pnpm db:migrate` aplica únicamente las migraciones existentes y no cambia el esquema automáticamente al arrancar.
+
+## Decisiones P3
+
+- La migración `20261003150000_events_rsvp_reminders_scheduler` es aditiva: campos opcionales, defaults para RSVP, preflight y CHECK `NOT VALID`/`VALIDATE CONSTRAINT`; añade `EventReminder` y `ScheduledJobRun` con índices únicos y de ejecución.
+- `NotificationsService` conserva la deduplicación por usuario y `dedupeKey` incluso cuando la preferencia in-app está apagada: crea un registro archivado como marcador antes de correo o push.
+- Los adaptadores locales siguen sin datos ficticios y no se usan para recordatorios; el planificador consulta solo PostgreSQL y los canales configurados.
 
 ## Principios aplicados
 

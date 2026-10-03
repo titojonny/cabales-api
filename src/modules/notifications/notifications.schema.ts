@@ -11,6 +11,7 @@ export const NOTIFICATION_TYPES = [
   'ocr.finished',
   'privacy.updated',
   'achievement.unlocked',
+  'event.reminder',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

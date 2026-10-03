@@ -241,7 +241,16 @@ export function createApp(dependencies: AppDependencies): Express {
       ),
     }),
   );
-  authenticated.use('/groups/:groupId/events', createEventsRouter(dependencies.events));
+  authenticated.use(
+    '/groups/:groupId/events',
+    createEventsRouter(dependencies.events, {
+      rsvpLimit: userLimit(
+        'event-rsvp',
+        config.EVENT_RSVP_RATE_LIMIT_MAX,
+        'Demasiadas respuestas RSVP',
+      ),
+    }),
+  );
   authenticated.use(
     '/groups/:groupId/expenses',
     createExpensesRouter(

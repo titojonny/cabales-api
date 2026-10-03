@@ -29,6 +29,13 @@ enum EventStatus {
   CANCELLED
 }
 
+enum EventParticipantRsvpStatus {
+  PENDING
+  GOING
+  MAYBE
+  DECLINED
+}
+
 enum SplitMode {
   EQUAL
   EXACT
@@ -89,6 +96,12 @@ enum NotificationStatus {
   UNREAD
   READ
   ARCHIVED
+}
+
+enum ScheduledJobStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
 }
 
 enum PrivacyRequestType {
@@ -269,6 +282,11 @@ model Event {
   name         String             @db.VarChar(160)
   description  String?            @db.VarChar(1000)
   startsAt     DateTime
+  endsAt       DateTime?
+  locationName String?            @db.VarChar(160)
+  locationAddress String?         @db.VarChar(500)
+  mapsUrl      String?            @db.VarChar(2048)
+  timeZone     String?            @db.VarChar(80)
   status       EventStatus        @default(OPEN)
   createdById  String             @db.Uuid
   createdAt    DateTime           @default(now())
@@ -277,6 +295,7 @@ model Event {
   createdBy    User               @relation("EventCreator", fields: [createdById], references: [id], onDelete: Restrict)
   participants EventParticipant[]
   links        EventLink[]
+  reminders    EventReminder[]
   expenses     Expense[]
   settlement   Settlement?
   documents    Document[]
@@ -292,6 +311,8 @@ model EventParticipant {
   eventId               String               @db.Uuid
   groupMemberId         String?              @db.Uuid
   guestName             String?              @db.VarChar(120)
+  rsvpStatus            EventParticipantRsvpStatus @default(PENDING)
+  respondedAt           DateTime?
   createdAt             DateTime             @default(now())
   event                 Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
   groupMember           GroupMember?         @relation(fields: [groupMemberId], references: [id], onDelete: Restrict)
@@ -302,6 +323,20 @@ model EventParticipant {
   @@unique([eventId, groupMemberId])
   @@index([eventId])
   @@index([groupMemberId])
+}
+
+/// Configuración de un recordatorio relativo al inicio del evento.
+model EventReminder {
+  id            String   @id @default(uuid()) @db.Uuid
+  eventId       String   @db.Uuid
+  minutesBefore Int
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, minutesBefore])
+  @@index([eventId, enabled])
 }
 
 model EventLink {
@@ -731,6 +766,21 @@ model NotificationPreference {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, type])
+}
+
+/// Estado persistente de una ejecución periódica; la clave representa una ventana idempotente.
+model ScheduledJobRun {
+  id           String            @id @default(uuid()) @db.Uuid
+  jobKey       String            @unique @db.VarChar(200)
+  status       ScheduledJobStatus @default(RUNNING)
+  attempts     Int               @default(0)
+  lastErrorCode String?          @db.VarChar(80)
+  startedAt    DateTime          @default(now())
+  finishedAt   DateTime?
+  updatedAt    DateTime          @updatedAt
+
+  @@index([status, updatedAt])
+  @@index([startedAt])
 }
 
 model Achievement {

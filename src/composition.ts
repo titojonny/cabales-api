@@ -26,6 +26,11 @@ import {
   type RateLimitStoreFactory,
 } from './infrastructure/rate-limit.js';
 import {
+  PostgresAdvisoryLock,
+  PrismaJobExecutionStore,
+  TaskScheduler,
+} from './infrastructure/scheduler.js';
+import {
   LocalFileStorageProvider,
   S3FileStorageProvider,
   type FileStorageProvider,
@@ -40,6 +45,7 @@ import { DocumentsRepository } from './modules/documents/documents.repository.js
 import { DocumentsService } from './modules/documents/documents.service.js';
 import { EventsRepository } from './modules/events/events.repository.js';
 import { EventsService } from './modules/events/events.service.js';
+import { EventRemindersService } from './modules/events/event-reminders.service.js';
 import { ExpensesRepository } from './modules/expenses/expenses.repository.js';
 import { ExpensesService } from './modules/expenses/expenses.service.js';
 import { FundsRepository } from './modules/funds/funds.repository.js';
@@ -153,7 +159,8 @@ export function createContainer(
     email,
     background,
   );
-  const events = new EventsService(new EventsRepository(db), groups, domainEvents);
+  const eventsRepository = new EventsRepository(db);
+  const events = new EventsService(eventsRepository, groups, domainEvents);
   const expenses = new ExpensesService(new ExpensesRepository(db), groups, domainEvents);
   const settlements = new SettlementsService(new SettlementsRepository(db), groups, domainEvents);
   const budgetsRepository = new BudgetsRepository(db);
@@ -167,6 +174,21 @@ export function createContainer(
     push,
     appOrigin: config.APP_ORIGIN,
     budgets,
+  });
+  const eventReminders = new EventRemindersService(eventsRepository, notifications);
+  const scheduler = new TaskScheduler({
+    enabled: config.SCHEDULER_ENABLED,
+    store: new PrismaJobExecutionStore(db),
+    lock: rateLimitStores.schedulerLock ?? new PostgresAdvisoryLock(db),
+    logger,
+    defaultMaxAttempts: config.SCHEDULER_MAX_ATTEMPTS,
+    lockTtlMs: config.SCHEDULER_LOCK_TTL_SECONDS * 1000,
+  });
+  scheduler.register({
+    name: 'event-reminders',
+    intervalMs: config.SCHEDULER_INTERVAL_SECONDS * 1000,
+    lockTtlMs: config.SCHEDULER_LOCK_TTL_SECONDS * 1000,
+    run: ({ now }) => eventReminders.run(now),
   });
   const achievements = new AchievementsService(db, notifications);
   domainEvents.subscribe((event) => notifications.handle(event));
@@ -209,5 +231,15 @@ export function createContainer(
     },
   });
 
-  return { app, db, background, rateLimitStores, storage, email, ocrProvider, push };
+  return {
+    app,
+    db,
+    background,
+    scheduler,
+    rateLimitStores,
+    storage,
+    email,
+    ocrProvider,
+    push,
+  };
 }

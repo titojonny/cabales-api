@@ -18,6 +18,7 @@ describe('loadConfig', () => {
     expect(config.EMAIL_PROVIDER).toBe('logging');
     expect(config.OCR_PROVIDER).toBe('disabled');
     expect(config.PUSH_SUBSCRIPTION_RATE_LIMIT_MAX).toBe(20);
+    expect(config.SCHEDULER_ENABLED).toBe(true);
     expect(config.retention.tokensMs).toBe(7 * 86_400_000);
   });
 
