@@ -1,78 +1,41 @@
 import { describe, expect, it } from 'vitest';
+import { AppError } from '../src/shared/errors.js';
 import {
-  centavosADolares,
-  dolaresACentavos,
-  repartirCentavosExactos,
-  repartirCentavosSobrantes
-} from '../src/utils/money.js';
+  assertCurrency,
+  assertExactTotal,
+  MAX_MONEY_CENTS,
+  splitEqual,
+  sumCents,
+} from '../src/shared/money.js';
 
-describe('dolaresACentavos', () => {
-  it('convierte sin errores de precisión de punto flotante', () => {
-    expect(dolaresACentavos(0.1) + dolaresACentavos(0.2)).toBe(30);
+describe('splitEqual', () => {
+  it('reparte centavos sobrantes de forma exacta y determinista', () => {
+    expect(splitEqual(10_000, 3)).toEqual([3334, 3333, 3333]);
+    expect(sumCents(splitEqual(10_000, 3))).toBe(10_000);
   });
 
-  it('redondea correctamente a 2 decimales', () => {
-    expect(dolaresACentavos(33.333)).toBe(3333);
-  });
-});
-
-describe('centavosADolares', () => {
-  it('convierte centavos a dólares', () => {
-    expect(centavosADolares(2500)).toBe(25);
-  });
-});
-
-describe('repartirCentavosSobrantes', () => {
-  it('100 entre 3 reparte el centavo sobrante', () => {
-    const partes = repartirCentavosSobrantes([33.33, 33.33, 33.33], 100);
-    expect(partes).toEqual([3334, 3333, 3333]);
-    expect(partes.reduce((a, b) => a + b, 0)).toBe(10000);
+  it('rechaza montos no enteros y participantes vacios', () => {
+    expect(() => splitEqual(10.5, 2)).toThrow(AppError);
+    expect(() => splitEqual(100, 0)).toThrow(AppError);
   });
 
-  it('50 entre 3 quita el centavo de más', () => {
-    const partes = repartirCentavosSobrantes([16.67, 16.67, 16.67], 50);
-    expect(partes).toEqual([1666, 1667, 1667]);
-    expect(partes.reduce((a, b) => a + b, 0)).toBe(5000);
-  });
-
-  it('con total exacto no toca las partes', () => {
-    const partes = repartirCentavosSobrantes([2.5, 2.5, 2.5, 2.5], 10);
-    expect(partes).toEqual([250, 250, 250, 250]);
-  });
-
-  it('la suma siempre cuadra con el total', () => {
-    const totales = [10.01, 99.99, 123.45, 0.03, 7.77];
-    for (const total of totales) {
-      const partes = repartirCentavosSobrantes([total / 3, total / 3, total / 3], total);
-      expect(partes.reduce((a, b) => a + b, 0)).toBe(dolaresACentavos(total));
-    }
-  });
-
-  it('lista vacía devuelve lista vacía', () => {
-    expect(repartirCentavosSobrantes([], 100)).toEqual([]);
+  it('respeta el rango INTEGER de PostgreSQL y monedas ISO', () => {
+    expect(() => splitEqual(MAX_MONEY_CENTS + 1, 2)).toThrow(AppError);
+    expect(() => assertCurrency('USD')).not.toThrow();
+    expect(() => assertCurrency('ZZZ')).toThrowError(
+      expect.objectContaining({ code: 'INVALID_CURRENCY' }),
+    );
   });
 });
 
-describe('repartirCentavosExactos', () => {
-  it('10000 entre 3 da [3334, 3333, 3333]', () => {
-    expect(repartirCentavosExactos(10000, 3)).toEqual([3334, 3333, 3333]);
-  });
-
-  it('la suma siempre cuadra con el total', () => {
-    const totales = [1, 99, 10000, 10001, 12345];
-    for (const total of totales) {
-      for (const cantidad of [1, 2, 3, 4, 7]) {
-        const partes = repartirCentavosExactos(total, cantidad);
-        expect(partes.reduce((a, b) => a + b, 0)).toBe(total);
-      }
-    }
-  });
-
-  it('divide exacto cuando el total es múltiplo', () => {
-    expect(repartirCentavosExactos(10000, 4)).toEqual([2500, 2500, 2500, 2500]);
-  });
-
-  it('cantidad inválida devuelve lista vacía', () => {
-    expect(repartirCentavosExactos(100, 0)).toEqual([]);
+describe('assertExactTotal', () => {
+  it('acepta solo partes positivas que cuadran', () => {
+    expect(() => assertExactTotal(100, [40, 60], 'MISMATCH')).not.toThrow();
+    expect(() => assertExactTotal(100, [40, 59], 'MISMATCH')).toThrowError(
+      expect.objectContaining({ code: 'MISMATCH' }),
+    );
+    expect(() => assertExactTotal(100, [100, 0], 'MISMATCH')).toThrowError(
+      expect.objectContaining({ code: 'INVALID_MONEY' }),
+    );
   });
 });

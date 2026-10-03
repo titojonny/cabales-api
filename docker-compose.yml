@@ -1,0 +1,64 @@
+# PostgreSQL y Redis exclusivos para desarrollo local; no contienen credenciales de producción.
+# El cliente React vive en el repositorio hermano cabales-app (Vite en :5173).
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cabales
+      POSTGRES_USER: cabales
+      POSTGRES_PASSWORD: cabales_local_only
+    ports:
+      # 5433 en el host para no chocar con un PostgreSQL de Windows u otros proyectos en 5432.
+      - '127.0.0.1:5433:5432'
+    volumes:
+      - cabales-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cabales -d cabales']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Store compartido de límites de solicitudes (RATE_LIMIT_STORE=redis).
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      # 6380 en el host para no chocar con otro Redis local en 6379.
+      - '127.0.0.1:6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:3000:3000'
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://cabales:cabales_local_only@postgres:5432/cabales?schema=public
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      APP_ORIGIN: http://localhost:5173
+      PUBLIC_API_ORIGIN: http://localhost:3000
+      COOKIE_NAME: cabales_session
+      SESSION_TTL_HOURS: 168
+      TRUST_PROXY: 0
+      RATE_LIMIT_STORE: redis
+      REDIS_URL: redis://redis:6379
+      STORAGE_LOCAL_DIR: /app/storage
+    volumes:
+      - cabales-storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  cabales-postgres:
+  cabales-storage:

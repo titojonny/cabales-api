@@ -1,0 +1,25 @@
+# Dependencias
+node_modules/
+npm-debug.log*
+
+# Documentos locales subidos (datos personales)
+storage/
+
+# Compilados
+dist/
+build/
+coverage/
+
+# Git y entornos
+.git/
+.gitignore
+.env
+.env.*
+.vscode/
+.idea/
+.agents/
+.claude/
+.windsurf/
+
+# Documentación no necesaria en la imagen
+*.md
