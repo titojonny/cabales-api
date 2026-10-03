@@ -42,6 +42,7 @@ import { AuthService } from './modules/auth/auth.service.js';
 import { BudgetsRepository } from './modules/budgets/budgets.repository.js';
 import { BudgetsService } from './modules/budgets/budgets.service.js';
 import { CabudasService } from './modules/cabudas/cabudas.service.js';
+import { PersonalCategoriesService } from './modules/categories/categories.service.js';
 import { DocumentsRepository } from './modules/documents/documents.repository.js';
 import { DocumentsService } from './modules/documents/documents.service.js';
 import { EventsRepository } from './modules/events/events.repository.js';
@@ -49,6 +50,7 @@ import { EventsService } from './modules/events/events.service.js';
 import { EventRemindersService } from './modules/events/event-reminders.service.js';
 import { ExpensesRepository } from './modules/expenses/expenses.repository.js';
 import { ExpensesService } from './modules/expenses/expenses.service.js';
+import { PersonalExpensesService } from './modules/expenses/personal-expenses.service.js';
 import { FundsRepository } from './modules/funds/funds.repository.js';
 import { FundsService } from './modules/funds/funds.service.js';
 import { GroupsRepository } from './modules/groups/groups.repository.js';
@@ -63,6 +65,8 @@ import { PrivacyService } from './modules/privacy/privacy.service.js';
 import { SettlementsRepository } from './modules/settlements/settlements.repository.js';
 import { SettlementsService } from './modules/settlements/settlements.service.js';
 import { StatisticsService } from './modules/statistics/statistics.service.js';
+import { RecurringExpensesService } from './modules/recurring-expenses/recurring-expenses.service.js';
+import { TagsService } from './modules/tags/tags.service.js';
 import { DomainEvents } from './shared/events.js';
 
 /** Sustituciones para pruebas (dobles de proveedores externos o base de datos compartida). */
@@ -173,7 +177,10 @@ export function createContainer(
   );
   const eventsRepository = new EventsRepository(db);
   const events = new EventsService(eventsRepository, groups, domainEvents);
+  const tags = new TagsService(db, groups);
+  const personalCategories = new PersonalCategoriesService(db);
   const expenses = new ExpensesService(new ExpensesRepository(db), groups, domainEvents);
+  const personalExpenses = new PersonalExpensesService(db, domainEvents);
   const settlements = new SettlementsService(new SettlementsRepository(db), groups, domainEvents);
   const budgetsRepository = new BudgetsRepository(db);
   const budgets = new BudgetsService(budgetsRepository, groups);
@@ -187,6 +194,7 @@ export function createContainer(
     appOrigin: config.APP_ORIGIN,
     budgets,
   });
+  const recurringExpenses = new RecurringExpensesService(db, groups, notifications, domainEvents);
   const eventReminders = new EventRemindersService(eventsRepository, notifications);
   const scheduler = new TaskScheduler({
     enabled: config.SCHEDULER_ENABLED,
@@ -202,6 +210,12 @@ export function createContainer(
     lockTtlMs: config.SCHEDULER_LOCK_TTL_SECONDS * 1000,
     run: ({ now }) => eventReminders.run(now),
   });
+  scheduler.register({
+    name: 'recurring-expenses',
+    intervalMs: config.SCHEDULER_INTERVAL_SECONDS * 1000,
+    lockTtlMs: config.SCHEDULER_LOCK_TTL_SECONDS * 1000,
+    run: ({ now }) => recurringExpenses.runDue(now),
+  });
   const achievements = new AchievementsService(db, notifications);
   domainEvents.subscribe((event) => notifications.handle(event));
   domainEvents.subscribe((event) => achievements.handle(event));
@@ -213,6 +227,10 @@ export function createContainer(
     groups,
     events,
     expenses,
+    personalExpenses,
+    personalCategories,
+    recurringExpenses,
+    tags,
     settlements,
     rateLimitStores,
     privacy: new PrivacyService(new PrivacyRepository(db), auth, {

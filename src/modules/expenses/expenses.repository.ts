@@ -38,9 +38,10 @@ export interface PreparedExpense {
     quantity: number;
     allocations: Array<{ eventParticipantId: string; amountCents: number }>;
   }>;
+  tagIds: string[];
 }
 
-const expenseDetail = {
+export const expenseDetail = {
   id: true,
   groupId: true,
   eventId: true,
@@ -55,6 +56,9 @@ const expenseDetail = {
   occurredAt: true,
   createdAt: true,
   categoryId: true,
+  ownerUserId: true,
+  recurringExpenseId: true,
+  tags: { select: { tag: { select: { id: true, name: true, groupId: true, ownerUserId: true } } } },
   participants: {
     select: {
       id: true,
@@ -106,9 +110,19 @@ export class ExpensesRepository {
     });
   }
 
-  list(groupId: string) {
+  list(groupId: string, filters: { tagId?: string; categoryId?: string; from?: Date; to?: Date; text?: string } = {}) {
     return this.db.expense.findMany({
-      where: { groupId },
+      where: {
+        groupId,
+        ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
+        ...(filters.tagId ? { tags: { some: { tagId: filters.tagId } } } : {}),
+        ...(filters.from || filters.to
+          ? { occurredAt: { ...(filters.from ? { gte: filters.from } : {}), ...(filters.to ? { lt: filters.to } : {}) } }
+          : {}),
+        ...(filters.text
+          ? { OR: [{ title: { contains: filters.text, mode: 'insensitive' as const } }, { notes: { contains: filters.text, mode: 'insensitive' as const } }] }
+          : {}),
+      },
       take: 100,
       select: {
         id: true,
@@ -123,6 +137,7 @@ export class ExpensesRepository {
         occurredAt: true,
         createdAt: true,
         categoryId: true,
+        tags: { select: { tag: { select: { id: true, name: true } } } },
         _count: { select: { participants: true, items: true } },
       },
       orderBy: [{ occurredAt: 'desc' }, { id: 'asc' }],
@@ -169,6 +184,13 @@ export class ExpensesRepository {
             );
             if (lockedGroups[0]?.currency !== input.expense.currency) {
               throw new Error('CURRENCY_MISMATCH');
+            }
+            if (input.expense.tagIds.length > 0) {
+              const tags = await tx.tag.findMany({
+                where: { id: { in: input.expense.tagIds }, groupId: input.groupId },
+                select: { id: true },
+              });
+              if (tags.length !== input.expense.tagIds.length) throw new Error('TAG_OUTSIDE_GROUP');
             }
 
             const event = await tx.event.findFirst({
@@ -261,6 +283,9 @@ export class ExpensesRepository {
                 currency: input.expense.currency,
                 splitMode: input.expense.splitMode,
                 occurredAt: input.expense.occurredAt,
+                ...(input.expense.tagIds.length > 0
+                  ? { tags: { create: input.expense.tagIds.map((tagId) => ({ tagId })) } }
+                  : {}),
               },
             });
             await tx.expenseParticipant.createMany({

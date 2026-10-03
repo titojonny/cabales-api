@@ -113,11 +113,15 @@ export class OcrService {
     ensure(job.documentId, 409, 'OCR_NOT_READY', 'El documento ya no existe');
     const expense = await this.repository.expenseGroup(expenseId);
     ensure(expense, 404, 'EXPENSE_NOT_FOUND', 'Gasto no encontrado');
-    await this.groups.requireRole(userId, expense.groupId, [
-      GroupRole.OWNER,
-      GroupRole.ADMIN,
-      GroupRole.MEMBER,
-    ]);
+    if (expense.groupId) {
+      await this.groups.requireRole(userId, expense.groupId, [
+        GroupRole.OWNER,
+        GroupRole.ADMIN,
+        GroupRole.MEMBER,
+      ]);
+    } else {
+      ensure(expense.ownerUserId === userId, 403, 'FORBIDDEN', 'No tienes acceso a este gasto');
+    }
     const document = await this.documents.readForProcessing(userId, job.documentId);
     const access = await this.documents.accessLevel(userId, document);
     const canLink =

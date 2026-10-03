@@ -124,6 +124,9 @@ export class PrivacyRepository {
       invitations,
       activity,
       fundMovements,
+      personalTags,
+      personalCategories,
+      recurringExpenses,
     ] = await Promise.all([
       this.db.user.findUniqueOrThrow({
         where: { id: userId },
@@ -198,6 +201,28 @@ export class PrivacyRepository {
       this.db.fundMovement.findMany({
         where: { createdById: userId },
         select: { fundId: true, type: true, amountCents: true, description: true, createdAt: true },
+      }),
+      this.db.tag.findMany({
+        where: { ownerUserId: userId },
+        select: { id: true, name: true },
+      }),
+      this.db.category.findMany({
+        where: { ownerUserId: userId },
+        select: { id: true, name: true, color: true },
+      }),
+      this.db.recurringExpense.findMany({
+        where: { ownerUserId: userId },
+        select: {
+          id: true,
+          title: true,
+          amountCents: true,
+          currency: true,
+          frequency: true,
+          chargeDay: true,
+          nextRunAt: true,
+          endsAt: true,
+          isActive: true,
+        },
       }),
     ]);
     const memberIds = memberships.map((membership) => membership.id);
@@ -304,6 +329,9 @@ export class PrivacyRepository {
       })),
       eventsCreated: events,
       expenses: [...expenses.values()].map(({ id: _id, ...rest }) => rest),
+      personalTags,
+      personalCategories,
+      recurringExpenses,
       settlementTransfers: transfers.map((transfer) => ({
         transferId: transfer.id,
         settlementId: transfer.settlementId,
@@ -395,6 +423,14 @@ export class PrivacyRepository {
           select: { storageKey: true },
         });
         const deleted = {
+          personalExpenses: (
+            await tx.expense.deleteMany({ where: { ownerUserId: userId } })
+          ).count,
+          personalRecurringExpenses: (
+            await tx.recurringExpense.deleteMany({ where: { ownerUserId: userId } })
+          ).count,
+          personalTags: (await tx.tag.deleteMany({ where: { ownerUserId: userId } })).count,
+          personalCategories: (await tx.category.deleteMany({ where: { ownerUserId: userId } })).count,
           accounts: (await tx.account.deleteMany({ where: { userId } })).count,
           sessions: (await tx.session.deleteMany({ where: { userId } })).count,
           verificationTokens: (await tx.emailVerificationToken.deleteMany({ where: { userId } }))

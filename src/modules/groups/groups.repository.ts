@@ -348,7 +348,7 @@ export class GroupsRepository {
 
   listCategories(groupId: string) {
     return this.db.category.findMany({
-      where: { OR: [{ groupId }, { groupId: null }] },
+      where: { OR: [{ groupId }, { groupId: null, ownerUserId: null }] },
       select: { id: true, groupId: true, name: true, color: true },
       orderBy: [{ groupId: 'asc' }, { name: 'asc' }],
       take: 200,
@@ -368,7 +368,14 @@ export class GroupsRepository {
 
   findCategory(groupId: string, categoryId: string) {
     return this.db.category.findFirst({
-      where: { id: categoryId, OR: [{ groupId }, { groupId: null }] },
+      where: { id: categoryId, OR: [{ groupId }, { groupId: null, ownerUserId: null }] },
+      select: { id: true },
+    });
+  }
+
+  tagsInGroup(groupId: string, tagIds: string[]) {
+    return this.db.tag.findMany({
+      where: { id: { in: tagIds }, groupId },
       select: { id: true },
     });
   }

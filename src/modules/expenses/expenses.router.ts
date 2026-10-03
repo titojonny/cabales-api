@@ -1,7 +1,7 @@
 import { Router, type RequestHandler } from 'express';
 import { sendData } from '../../http/response.js';
-import { idempotencyHeader, uuidParam, validateBody } from '../../shared/validation.js';
-import { createExpenseSchema, type CreateExpenseInput } from './expenses.schema.js';
+import { idempotencyHeader, uuidParam, validateBody, validateQuery } from '../../shared/validation.js';
+import { createExpenseSchema, groupExpenseQuerySchema, type CreateExpenseInput, type GroupExpenseQuery } from './expenses.schema.js';
 import type { ExpensesService } from './expenses.service.js';
 
 /** Endpoints financieros de gastos anidados bajo el grupo. */
@@ -27,12 +27,13 @@ export function createExpensesRouter(
       });
     },
   );
-  router.get('/', async (req, res) => {
+  router.get('/', validateQuery(groupExpenseQuerySchema), async (req, res) => {
     sendData(
       res,
       await service.list(
         req.auth!.userId,
         uuidParam((req.params as Record<string, string | undefined>)['groupId']),
+        req.validatedQuery as GroupExpenseQuery,
       ),
     );
   });

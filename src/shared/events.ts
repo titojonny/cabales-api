@@ -19,6 +19,7 @@ export type DomainEvent =
       inviterId: string;
     }
   | { type: 'expense.created'; groupId: string; expenseId: string; userId: string }
+  | { type: 'personal-expense.created'; expenseId: string; userId: string }
   | {
       type: 'settlement.created';
       groupId: string;

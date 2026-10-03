@@ -98,7 +98,7 @@ export class OcrRepository {
   expenseGroup(expenseId: string) {
     return this.db.expense.findUnique({
       where: { id: expenseId },
-      select: { id: true, groupId: true },
+      select: { id: true, groupId: true, ownerUserId: true },
     });
   }
 

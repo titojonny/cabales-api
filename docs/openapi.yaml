@@ -2859,6 +2859,88 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/expenses:
+    get:
+      summary: Historial autorizado de gastos personales y grupales
+      parameters:
+        - { name: scope, in: query, schema: { type: string, enum: [ALL, PERSONAL, GROUPS] } }
+        - { name: month, in: query, schema: { type: string, pattern: '^\\d{4}-(0[1-9]|1[0-2])$' } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: tagId, in: query, schema: { type: string, format: uuid } }
+        - { name: groupId, in: query, schema: { type: string, format: uuid } }
+        - { name: text, in: query, schema: { type: string, maxLength: 120 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses:
+        '200': { description: Gastos autorizados con total en meta }
+    post:
+      summary: Crear gasto personal idempotente
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PersonalExpenseInput' } } } }
+      responses:
+        '201': { description: Gasto creado }
+  /api/v1/expenses/{expenseId}:
+    parameters: [{ name: expenseId, in: path, required: true, schema: { type: string, format: uuid } }]
+    get: { summary: Consultar gasto autorizado, responses: { '200': { description: Gasto }, '404': { description: No encontrado } } }
+    patch: { summary: Editar gasto personal propio, responses: { '200': { description: Gasto actualizado } } }
+    delete: { summary: Eliminar gasto personal propio, responses: { '200': { description: Eliminado } } }
+  /api/v1/categories:
+    get: { summary: Listar categorias personales, responses: { '200': { description: Categorias } } }
+    post: { summary: Crear categoria personal, responses: { '201': { description: Creada } } }
+  /api/v1/categories/{categoryId}:
+    parameters: [{ name: categoryId, in: path, required: true, schema: { type: string, format: uuid } }]
+    patch: { summary: Editar categoria personal propia, responses: { '200': { description: Actualizada } } }
+    delete: { summary: Eliminar categoria personal propia, responses: { '200': { description: Eliminada } } }
+  /api/v1/tags:
+    get: { summary: Listar etiquetas personales, responses: { '200': { description: Etiquetas } } }
+    post: { summary: Crear etiqueta personal, responses: { '201': { description: Creada } } }
+  /api/v1/tags/{tagId}:
+    parameters: [{ name: tagId, in: path, required: true, schema: { type: string, format: uuid } }]
+    patch: { summary: Editar etiqueta personal propia, responses: { '200': { description: Actualizada } } }
+    delete: { summary: Eliminar etiqueta personal propia, responses: { '200': { description: Eliminada } } }
+  /api/v1/recurring-expenses:
+    get: { summary: Listar recurrentes personales, responses: { '200': { description: Recurrentes } } }
+    post: { summary: Crear recurrente personal, responses: { '201': { description: Creado } } }
+  /api/v1/recurring-expenses/{recurringId}:
+    parameters: [{ name: recurringId, in: path, required: true, schema: { type: string, format: uuid } }]
+    patch: { summary: Editar recurrente personal propio, responses: { '200': { description: Actualizado } } }
+    delete: { summary: Eliminar recurrente personal propio, responses: { '200': { description: Eliminado } } }
+  /api/v1/recurring-expenses/{recurringId}/pause:
+    parameters: [{ name: recurringId, in: path, required: true, schema: { type: string, format: uuid } }]
+    post: { summary: Pausar recurrente personal propio, responses: { '200': { description: Actualizado } } }
+  /api/v1/recurring-expenses/{recurringId}/resume:
+    parameters: [{ name: recurringId, in: path, required: true, schema: { type: string, format: uuid } }]
+    post: { summary: Reanudar recurrente personal propio, responses: { '200': { description: Actualizado } } }
+  /api/v1/groups/{groupId}/tags:
+    get: { summary: Listar etiquetas del grupo, responses: { '200': { description: Etiquetas } } }
+    post: { summary: Crear etiqueta del grupo, responses: { '201': { description: Creada } } }
+  /api/v1/groups/{groupId}/tags/{tagId}:
+    parameters:
+      - { name: groupId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tagId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch: { summary: Editar etiqueta del grupo, responses: { '200': { description: Actualizada } } }
+    delete: { summary: Eliminar etiqueta del grupo, responses: { '200': { description: Eliminada } } }
+  /api/v1/groups/{groupId}/recurring-expenses:
+    get: { summary: Listar recurrentes del grupo, responses: { '200': { description: Recurrentes } } }
+    post: { summary: Crear recurrente del grupo, responses: { '201': { description: Creado } } }
+  /api/v1/groups/{groupId}/recurring-expenses/{recurringId}:
+    parameters:
+      - { name: groupId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: recurringId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch: { summary: Editar recurrente del grupo, responses: { '200': { description: Actualizado } } }
+    delete: { summary: Eliminar recurrente del grupo, responses: { '200': { description: Eliminado } } }
+  /api/v1/groups/{groupId}/recurring-expenses/{recurringId}/pause:
+    parameters:
+      - { name: groupId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: recurringId, in: path, required: true, schema: { type: string, format: uuid } }
+    post: { summary: Pausar recurrente del grupo, responses: { '200': { description: Actualizado } } }
+  /api/v1/groups/{groupId}/recurring-expenses/{recurringId}/resume:
+    parameters:
+      - { name: groupId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: recurringId, in: path, required: true, schema: { type: string, format: uuid } }
+    post: { summary: Reanudar recurrente del grupo, responses: { '200': { description: Actualizado } } }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -3123,6 +3205,18 @@ components:
       properties:
         success: { const: true }
         data: {}
+    PersonalExpenseInput:
+      type: object
+      additionalProperties: false
+      required: [title, totalCents, currency, occurredAt]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 160 }
+        notes: { type: string, maxLength: 1000 }
+        categoryId: { type: string, format: uuid }
+        tagIds: { type: array, maxItems: 10, items: { type: string, format: uuid } }
+        totalCents: { type: integer, minimum: 1 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        occurredAt: { type: string, format: date-time }
     ErrorEnvelope:
       type: object
       additionalProperties: false

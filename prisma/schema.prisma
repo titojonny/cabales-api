@@ -154,6 +154,7 @@ model User {
   createdGroups           Group[]                  @relation("GroupCreator")
   createdEvents           Event[]                  @relation("EventCreator")
   createdExpenses         Expense[]                @relation("ExpenseCreator")
+  personalExpenses        Expense[]                @relation("PersonalExpenseOwner")
   createdSettlements      Settlement[]             @relation("SettlementCreator")
   paidTransfers           SettlementTransfer[]     @relation("TransferMarker")
   createdFunds            Fund[]                   @relation("FundCreator")
@@ -172,6 +173,10 @@ model User {
   privacyRequests         PrivacyRequest[]
   requestedOcrJobs        OcrJob[]                 @relation("OcrJobRequester")
   createdBudgets          Budget[]                 @relation("BudgetCreator")
+  ownedTags               Tag[]                    @relation("PersonalTagOwner")
+  ownedCategories         Category[]               @relation("PersonalCategoryOwner")
+  ownedRecurringExpenses  RecurringExpense[]       @relation("RecurringExpenseOwner")
+  createdRecurringExpenses RecurringExpense[]      @relation("RecurringExpenseCreator")
   notificationPreferences NotificationPreference[]
   incomes                 Income[]
 }
@@ -316,6 +321,7 @@ model Event {
   links        EventLink[]
   reminders    EventReminder[]
   expenses     Expense[]
+  recurring    RecurringExpense[]
   settlement   Settlement?
   documents    Document[]
 
@@ -336,6 +342,7 @@ model EventParticipant {
   event                 Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
   groupMember           GroupMember?         @relation(fields: [groupMemberId], references: [id], onDelete: Restrict)
   expenseParticipations ExpenseParticipant[]
+  recurringExpenses    RecurringExpenseParticipant[]
   outgoingTransfers     SettlementTransfer[] @relation("TransferDebtor")
   incomingTransfers     SettlementTransfer[] @relation("TransferCreditor")
 
@@ -372,8 +379,9 @@ model EventLink {
 /// Gasto inmutable en centavos una vez incluido en una liquidación.
 model Expense {
   id               String               @id @default(uuid()) @db.Uuid
-  groupId          String               @db.Uuid
-  eventId          String               @db.Uuid
+  groupId          String?              @db.Uuid
+  eventId          String?              @db.Uuid
+  ownerUserId      String?              @db.Uuid
   title            String               @db.VarChar(160)
   notes            String?              @db.VarChar(1000)
   totalCents       Int
@@ -385,12 +393,16 @@ model Expense {
   occurredAt       DateTime
   createdById      String               @db.Uuid
   categoryId       String?              @db.Uuid
+  recurringExpenseId String?             @db.Uuid
+  recurringPeriodKey String?             @db.VarChar(32)
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
-  group            Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  event            Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  group            Group?               @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event            Event?               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  owner            User?                @relation("PersonalExpenseOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   createdBy        User                 @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: Restrict)
   category         Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  recurringExpense RecurringExpense?    @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
   participants     ExpenseParticipant[]
   payers           ExpensePayer[]
   items            ExpenseItem[]
@@ -402,7 +414,9 @@ model Expense {
   @@index([groupId, occurredAt])
   @@index([eventId, occurredAt])
   @@index([createdById])
+  @@index([ownerUserId, occurredAt])
   @@index([categoryId])
+  @@unique([recurringExpenseId, recurringPeriodKey])
 }
 
 /// Desglose exacto de un participante; la suma de sus tres componentes es shareCents.
@@ -613,26 +627,36 @@ model FundMovement {
 }
 
 model Category {
-  id       String    @id @default(uuid()) @db.Uuid
-  groupId  String?   @db.Uuid
-  name     String    @db.VarChar(80)
-  color    String?   @db.VarChar(20)
-  group    Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid()) @db.Uuid
+  groupId     String?   @db.Uuid
+  ownerUserId String?   @db.Uuid
+  name        String    @db.VarChar(80)
+  color       String?   @db.VarChar(20)
+  group       Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  owner       User?     @relation("PersonalCategoryOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   expenses Expense[]
   budgets  Budget[]
+  recurring RecurringExpense[]
 
   @@unique([groupId, name])
+  @@unique([ownerUserId, name])
   @@index([groupId])
+  @@index([ownerUserId])
 }
 
 model Tag {
-  id       String       @id @default(uuid()) @db.Uuid
-  groupId  String       @db.Uuid
-  name     String       @db.VarChar(50)
-  group    Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id          String       @id @default(uuid()) @db.Uuid
+  groupId     String?      @db.Uuid
+  ownerUserId String?      @db.Uuid
+  name        String       @db.VarChar(50)
+  group       Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  owner       User?        @relation("PersonalTagOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   expenses ExpenseTag[]
+  recurringExpenses RecurringExpenseTag[]
 
   @@unique([groupId, name])
+  @@unique([ownerUserId, name])
+  @@index([ownerUserId])
 }
 
 model ExpenseTag {
@@ -670,18 +694,34 @@ model Budget {
 }
 
 model RecurringExpense {
-  id          String             @id @default(uuid()) @db.Uuid
-  groupId     String             @db.Uuid
-  title       String             @db.VarChar(160)
-  amountCents Int
-  currency    String             @db.Char(3)
-  frequency   RecurringFrequency
-  nextRunAt   DateTime
-  isActive    Boolean            @default(true)
-  createdAt   DateTime           @default(now())
-  group       Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id             String                          @id @default(uuid()) @db.Uuid
+  groupId        String?                         @db.Uuid
+  eventId        String?                         @db.Uuid
+  ownerUserId    String?                         @db.Uuid
+  createdById    String?                         @db.Uuid
+  title          String                          @db.VarChar(160)
+  notes          String?                         @db.VarChar(1000)
+  amountCents    Int
+  currency       String                          @db.Char(3)
+  categoryId     String?                         @db.Uuid
+  frequency      RecurringFrequency
+  chargeDay      Int                             @default(1)
+  nextRunAt      DateTime
+  endsAt         DateTime?
+  isActive       Boolean                         @default(true)
+  createdAt      DateTime                        @default(now())
+  updatedAt      DateTime                        @default(now()) @updatedAt
+  group          Group?                          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event          Event?                          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  owner          User?                           @relation("RecurringExpenseOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  createdBy      User?                           @relation("RecurringExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  category       Category?                       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  participants   RecurringExpenseParticipant[]
+  tags           RecurringExpenseTag[]
+  expenses       Expense[]
 
   @@index([groupId, isActive])
+  @@index([ownerUserId, isActive])
   @@index([nextRunAt, isActive])
 }
 
@@ -700,6 +740,29 @@ model Income {
 
   @@index([userId, date])
   @@index([userId, currency, date])
+}
+
+model RecurringExpenseParticipant {
+  id                 String           @id @default(uuid()) @db.Uuid
+  recurringExpenseId String           @db.Uuid
+  eventParticipantId String           @db.Uuid
+  shareCents         Int
+  payerAmountCents   Int?
+  recurringExpense   RecurringExpense @relation(fields: [recurringExpenseId], references: [id], onDelete: Cascade)
+  eventParticipant   EventParticipant @relation(fields: [eventParticipantId], references: [id], onDelete: Restrict)
+
+  @@unique([recurringExpenseId, eventParticipantId])
+  @@index([eventParticipantId])
+}
+
+model RecurringExpenseTag {
+  recurringExpenseId String           @db.Uuid
+  tagId              String           @db.Uuid
+  recurringExpense   RecurringExpense @relation(fields: [recurringExpenseId], references: [id], onDelete: Cascade)
+  tag                Tag              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([recurringExpenseId, tagId])
+  @@index([tagId])
 }
 
 model Document {

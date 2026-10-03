@@ -142,6 +142,8 @@ describe('regresiones de eliminacion y fondos', () => {
         findMany: vi.fn(async () => []),
       },
       group: { delete: vi.fn(async () => undefined) },
+      tag: model(),
+      category: model(),
       account: model(),
       session: model(),
       emailVerificationToken: model(),
