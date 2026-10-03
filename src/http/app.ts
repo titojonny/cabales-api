@@ -200,6 +200,12 @@ export function createApp(dependencies: AppDependencies): Express {
     'ip',
     'Demasiados intentos con enlaces',
   );
+  const googleCallbackIp = limit(
+    'google-oauth-callback',
+    config.AUTH_RATE_LIMIT_MAX * 2,
+    'ip',
+    'Demasiados intentos de inicio con Google',
+  );
   v1.use(['/auth/login', '/auth/register'], authIp, authEmail);
   v1.use(
     [
@@ -212,6 +218,7 @@ export function createApp(dependencies: AppDependencies): Express {
     recoveryEmail,
   );
   v1.use(['/auth/email-verification/confirm', '/auth/password-recovery/confirm'], tokenIp);
+  v1.use('/auth/google/callback', googleCallbackIp);
   v1.use('/auth', createAuthRouter(dependencies.auth, config));
   if (dependencies.localStorage && dependencies.documents) {
     v1.use(

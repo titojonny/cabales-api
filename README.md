@@ -1,5 +1,18 @@
 # Cabales API
 
+## P9: inicio de sesion con Google
+
+Google se integra como OpenID Connect mediante authorization code + PKCE. El proveedor permanece deshabilitado si `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI` no estan configurados juntos. `GET /api/v1/auth/config` expone unicamente `{ googleEnabled }` para que la PWA decida si muestra el boton.
+
+Para crear el cliente en Google Cloud:
+
+1. En Google Cloud Console crea o selecciona un proyecto, configura la pantalla de consentimiento OAuth y publica los scopes `openid`, `email` y `profile` segun el estado del proyecto.
+2. En **APIs y servicios > Credenciales**, crea un **ID de cliente OAuth** de tipo **Aplicacion web**.
+3. En **URIs de redireccion autorizados** registra exactamente `http://localhost:3000/api/v1/auth/google/callback` para desarrollo. En produccion registra el URI HTTPS publico exacto de la API, por ejemplo `https://api.example.com/api/v1/auth/google/callback`; no uses comodines ni el URI de la PWA.
+4. Copia el ID y el secreto unicamente al entorno del servidor: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI`. Nunca los pongas en la PWA, en git ni en logs.
+
+El callback valida `state`, `nonce`, PKCE, la firma RS256 con las claves publicas actuales de Google y los claims `aud`, `iss`, `exp` y `email_verified`. Los estados OIDC se consumen una sola vez; sus valores sensibles solo se guardan como hashes en PostgreSQL y el verifier viaja en una cookie HttpOnly temporal. Un correo de Google no verificado nunca crea ni vincula una cuenta. El acceso autenticado puede vincular o desvincular Google desde Cuenta; la API rechaza desvincular el ultimo metodo de acceso.
+
 ## P3: eventos, RSVP y recordatorios
 
 Los eventos admiten edición parcial (`PATCH /groups/:groupId/events/:eventId`) de nombre, descripción, inicio/fin, ubicación, Maps HTTPS, zona horaria y enlaces. La fecha final debe ser igual o posterior al inicio. La persona creadora o `OWNER`/`ADMIN` puede editar, cancelar y configurar recordatorios; eliminar solo es posible cuando no existen gastos ni liquidación y devuelve `409 EVENT_HAS_FINANCIAL_ACTIVITY` en caso contrario.
@@ -127,6 +140,7 @@ pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema
 - `CORS_ORIGINS`: allowlist exacta separada por comas (`http://localhost:5173` y `http://127.0.0.1:5173` por defecto); nunca se usa comodín con credenciales.
 - `SESSION_TTL_HOURS`: vigencia de la sesión, por defecto 168 horas.
 - `COOKIE_NAME`: nombre de la cookie HttpOnly.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI`: cliente OIDC opcional; deben existir juntos para habilitar Google. El redirect local es `http://localhost:3000/api/v1/auth/google/callback` y en produccion debe ser el URI HTTPS exacto registrado en Google Cloud.
 - `RATE_LIMIT_STORE` (`memory`|`redis`) y `REDIS_URL`: store de límites; producción exige Redis compartido y el arranque falla sin él. Si Redis cae, los límites sensibles fallan cerrados (503) y el global deja pasar.
 - `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `EXPENSE_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario) y `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario).
 - `SCHEDULER_ENABLED`, `SCHEDULER_INTERVAL_SECONDS`, `SCHEDULER_LOCK_TTL_SECONDS` y `SCHEDULER_MAX_ATTEMPTS`: habilitación, frecuencia, TTL del lock y reintentos acotados del planificador. En producción no se debe desactivar el job de recordatorios.
@@ -169,13 +183,13 @@ Toda respuesta usa el sobre `{ "success": true, "data": ..., "meta": ... }` o `{
 Endpoints públicos:
 
 - `GET /health`, `GET /ready`
-- `POST /api/v1/auth/register`, `POST /api/v1/auth/login`
+- `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/config`, `GET /api/v1/auth/google/start` y `GET /api/v1/auth/google/callback`
 - `POST /api/v1/auth/email-verification/{request,resend,confirm}` y `POST /api/v1/auth/password-recovery/{request,resend,confirm}`: request/resend responden 202 idéntico exista o no la cuenta.
 - `GET /api/v1/storage/local/:token`: descarga con URL firmada de corta duración.
 
 Endpoints autenticados:
 
-- `POST /api/v1/auth/logout`, `GET|PATCH /api/v1/auth/me`
+- `POST /api/v1/auth/logout`, `GET|PATCH /api/v1/auth/me`, `GET /api/v1/auth/methods`, `POST /api/v1/auth/google/link/start`, `DELETE /api/v1/auth/google`
 - `POST|GET /api/v1/groups`
 - `GET|PATCH|DELETE /api/v1/groups/:groupId`
 - `GET|POST /api/v1/groups/:groupId/invitations`, `POST .../invitations/:invitationId/{resend,revoke}`
