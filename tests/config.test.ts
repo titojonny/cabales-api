@@ -5,10 +5,13 @@ const base = { DATABASE_URL: 'postgresql://u:p@localhost:5432/db' };
 const production = {
   ...base,
   NODE_ENV: 'production',
+  APP_ORIGIN: 'https://app.cabales.com',
   CORS_ORIGINS: 'https://app.cabales.com',
   RATE_LIMIT_STORE: 'redis',
   REDIS_URL: 'redis://redis:6379',
   STORAGE_SIGNING_SECRET: 'x'.repeat(40),
+  DOCUMENT_ENCRYPTION_KEYS: `primary:${Buffer.alloc(32, 1).toString('base64')}`,
+  DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID: 'primary',
 };
 
 describe('loadConfig', () => {

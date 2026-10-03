@@ -1,4 +1,6 @@
 import { DocumentAccessLevel, GroupRole } from '@prisma/client';
+import { Readable } from 'node:stream';
+import { hashToken, randomToken } from '../../shared/crypto.js';
 import { AppError, ensure } from '../../shared/errors.js';
 import { ExternalProviderError } from '../../infrastructure/errors.js';
 import {
@@ -8,6 +10,8 @@ import {
   type FileStorageProvider,
 } from '../../infrastructure/storage.js';
 import type { GroupsService } from '../groups/groups.service.js';
+import type { NotificationsService } from '../notifications/notifications.service.js';
+import type { DocumentEncryption } from './document-encryption.js';
 import type { DocumentRow, DocumentsRepository } from './documents.repository.js';
 import type { ListDocumentsQuery, UpdateDocumentInput, UploadQuery } from './documents.schema.js';
 
@@ -38,7 +42,16 @@ export class DocumentsService {
     private readonly repository: DocumentsRepository,
     private readonly groups: GroupsService,
     private readonly storage: FileStorageProvider,
-    private readonly options: { maxBytes: number; signedUrlTtlSeconds: number },
+    private readonly options: {
+      maxBytes: number;
+      signedUrlTtlSeconds: number;
+      encryption?: DocumentEncryption;
+      requireEncryption?: boolean;
+      publicApiOrigin?: string;
+      publicShareOrigin?: string;
+      s3Sse?: 'AES256' | 'aws:kms';
+      s3SseKmsKeyId?: string;
+    },
   ) {}
 
   /** Nivel efectivo: propietario, concesión explícita o rol en el grupo del documento. */
@@ -60,7 +73,8 @@ export class DocumentsService {
     // Las concesiones de un documento de grupo dejan de ser válidas al salir del grupo.
     if (membership || !document.groupId) {
       const grant = await this.repository.grantFor(document.id, userId);
-      if (grant) level = Math.max(level, RANK[grant.access]);
+      if (grant && (!grant.expiresAt || grant.expiresAt.getTime() > Date.now()))
+        level = Math.max(level, RANK[grant.access]);
     }
     if (membership && level < RANK.MANAGE) {
       level = Math.max(level, membership.role === GroupRole.MEMBER ? RANK.VIEW : RANK.MANAGE);
@@ -84,15 +98,21 @@ export class DocumentsService {
     return { document, access };
   }
 
-  private present(document: DocumentRow, access: DocumentAccessLevel) {
+  private present(document: DocumentRow, access: DocumentAccessLevel, userId?: string) {
     const {
       ownerId: _ownerId,
       storageKey: _storageKey,
+      encryptionKeyId: _encryptionKeyId,
+      encryptionIv: _encryptionIv,
+      encryptionTag: _encryptionTag,
+      wrappedDataKey: _wrappedDataKey,
+      pins: _pins,
       ...rest
     } = document as DocumentRow & {
       storageKey?: string;
+      pins?: Array<{ userId: string }>;
     };
-    return { ...rest, access };
+    return { ...rest, access, isPinned: Boolean(userId && _pins?.some((pin) => pin.userId === userId)) };
   }
 
   private async assertAssociations(
@@ -151,8 +171,28 @@ export class DocumentsService {
       ]);
     }
     await this.assertAssociations(query.groupId, query);
+    if (query.expiresAt)
+      ensure(new Date(query.expiresAt).getTime() > Date.now(), 422, 'DOCUMENT_EXPIRY', 'La caducidad debe estar en el futuro');
     const storageKey = newStorageKey('documents');
-    await this.storage.put(storageKey, bytes, mimeType);
+    const encrypted = this.options.encryption?.enabled;
+    ensure(
+      encrypted || !this.options.requireEncryption,
+      503,
+      'DOCUMENT_ENCRYPTION_REQUIRED',
+      'El cifrado de documentos es obligatorio en este servidor',
+    );
+    const payload = encrypted ? this.options.encryption!.encrypt(bytes) : undefined;
+    await this.storage.put(
+      storageKey,
+      payload?.ciphertext ?? bytes,
+      mimeType,
+      this.options.s3Sse
+        ? {
+            serverSideEncryption: this.options.s3Sse,
+            ...(this.options.s3SseKmsKeyId ? { kmsKeyId: this.options.s3SseKmsKeyId } : {}),
+          }
+        : undefined,
+    );
     try {
       const document = await this.repository.create({
         ownerId: userId,
@@ -161,13 +201,25 @@ export class DocumentsService {
         mimeType,
         sizeBytes: bytes.length,
         checksumSha256: sha256(bytes),
+        category: query.category,
+        expiresAt: query.expiresAt ? new Date(query.expiresAt) : null,
+        expiryNoticeDays: query.expiryNoticeDays ?? [30, 7],
+        isLegacy: !payload,
+        ...(payload
+          ? {
+              encryptionKeyId: payload.keyId,
+              encryptionIv: payload.iv,
+              encryptionTag: payload.tag,
+              wrappedDataKey: payload.wrappedDataKey,
+            }
+          : {}),
         requestId,
         ...(query.groupId ? { groupId: query.groupId } : {}),
         ...(query.eventId ? { eventId: query.eventId } : {}),
         ...(query.expenseId ? { expenseId: query.expenseId } : {}),
         ...(query.settlementId ? { settlementId: query.settlementId } : {}),
       });
-      return this.present(document, DocumentAccessLevel.MANAGE);
+      return this.present(document, DocumentAccessLevel.MANAGE, userId);
     } catch (error) {
       // Compensación: no dejar objetos huérfanos si falla el registro de metadatos.
       await this.storage.delete(storageKey).catch(() => undefined);
@@ -190,27 +242,32 @@ export class DocumentsService {
         ...(query.eventId ? { eventId: query.eventId } : {}),
         ...(query.expenseId ? { expenseId: query.expenseId } : {}),
         ...(query.settlementId ? { settlementId: query.settlementId } : {}),
+        ...(query.category ? { category: query.category } : {}),
       },
       query.cursor,
       query.limit,
+      query.pinned ? userId : undefined,
+      query.recent ? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) : undefined,
     );
     const page = rows.slice(0, query.limit);
     const items = [];
     for (const row of page) {
       const access = await this.accessLevel(userId, row);
-      if (access) items.push(this.present(row, access));
+      if (access) items.push(this.present(row, access, userId));
     }
     return { items, nextCursor: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null };
   }
 
   async detail(userId: string, documentId: string) {
     const { document, access } = await this.require(userId, documentId, DocumentAccessLevel.VIEW);
-    return this.present(document, access);
+    return this.present(document, access, userId);
   }
 
   async update(userId: string, documentId: string, input: UpdateDocumentInput, requestId: string) {
     const { document, access } = await this.require(userId, documentId, DocumentAccessLevel.EDIT);
     await this.assertAssociations(document.groupId, input);
+    if (input.expiresAt)
+      ensure(new Date(input.expiresAt).getTime() > Date.now(), 422, 'DOCUMENT_EXPIRY', 'La caducidad debe estar en el futuro');
     const updated = await this.repository.update(
       documentId,
       {
@@ -218,11 +275,16 @@ export class DocumentsService {
         ...(input.eventId !== undefined ? { eventId: input.eventId } : {}),
         ...(input.expenseId !== undefined ? { expenseId: input.expenseId } : {}),
         ...(input.settlementId !== undefined ? { settlementId: input.settlementId } : {}),
+        ...(input.category !== undefined ? { category: input.category } : {}),
+        ...(input.expiresAt !== undefined
+          ? { expiresAt: input.expiresAt ? new Date(input.expiresAt) : null }
+          : {}),
+        ...(input.expiryNoticeDays !== undefined ? { expiryNoticeDays: input.expiryNoticeDays } : {}),
       },
       userId,
       requestId,
     );
-    return this.present(updated, access);
+    return this.present(updated, access, userId);
   }
 
   async remove(userId: string, documentId: string, requestId: string) {
@@ -232,13 +294,26 @@ export class DocumentsService {
   }
 
   async downloadUrl(userId: string, documentId: string, requestId: string) {
-    const { document } = await this.require(userId, documentId, DocumentAccessLevel.VIEW);
-    const signed = await this.storage.signedDownloadUrl(
-      { key: document.storageKey, fileName: document.name, mimeType: document.mimeType },
-      this.options.signedUrlTtlSeconds,
-    );
+    await this.require(userId, documentId, DocumentAccessLevel.VIEW);
     await this.repository.logAccess(documentId, userId, 'download_url', requestId);
-    return signed;
+    return {
+      url: `${this.options.publicApiOrigin ?? ''}/api/v1/documents/${encodeURIComponent(documentId)}/download`,
+      expiresAt: new Date(Date.now() + this.options.signedUrlTtlSeconds * 1000),
+    };
+  }
+
+  async download(userId: string, documentId: string, requestId: string) {
+    const { document } = await this.require(userId, documentId, DocumentAccessLevel.VIEW);
+    const bytes = await this.readDocumentBytes(document);
+    await this.repository.logAccess(documentId, userId, 'download', requestId);
+    return { document, bytes };
+  }
+
+  async downloadStream(userId: string, documentId: string, requestId: string) {
+    const { document } = await this.require(userId, documentId, DocumentAccessLevel.VIEW);
+    const stream = await this.readDocumentStream(document);
+    await this.repository.logAccess(documentId, userId, 'download', requestId);
+    return { document, stream };
   }
 
   /** Lectura interna para OCR; exige al menos VIEW. */
@@ -257,12 +332,58 @@ export class DocumentsService {
     }
   }
 
+  private async readDocumentBytes(document: DocumentRow & { storageKey: string }) {
+    const ciphertext = await this.readBytes(document.storageKey);
+    if (document.isLegacy) return ciphertext;
+    ensure(
+      this.options.encryption,
+      503,
+      'DOCUMENT_ENCRYPTION_UNAVAILABLE',
+      'El cifrado de documentos no esta configurado',
+    );
+    return this.options.encryption.decrypt({
+      ciphertext,
+      keyId: document.encryptionKeyId,
+      iv: document.encryptionIv,
+      tag: document.encryptionTag,
+      wrappedDataKey: document.wrappedDataKey,
+      isLegacy: document.isLegacy,
+    });
+  }
+
+  private async readDocumentStream(document: DocumentRow & { storageKey: string }) {
+    const source = this.storage.getStream
+      ? await this.storage.getStream(document.storageKey)
+      : Readable.from([await this.readBytes(document.storageKey)]);
+    if (document.isLegacy) return source;
+    ensure(
+      this.options.encryption,
+      503,
+      'DOCUMENT_ENCRYPTION_UNAVAILABLE',
+      'El cifrado de documentos no esta configurado',
+    );
+    return source.pipe(
+      this.options.encryption.createDecipher({
+        keyId: document.encryptionKeyId,
+        iv: document.encryptionIv,
+        tag: document.encryptionTag,
+        wrappedDataKey: document.wrappedDataKey,
+      }),
+    );
+  }
+
+  async readDocumentForProcessing(userId: string, documentId: string) {
+    const { document } = await this.require(userId, documentId, DocumentAccessLevel.VIEW);
+    return { document, bytes: await this.readDocumentBytes(document) };
+  }
+
   async listGrants(userId: string, documentId: string) {
     await this.require(userId, documentId, DocumentAccessLevel.MANAGE);
     return (await this.repository.listGrants(documentId)).map((grant) => ({
       userId: grant.userId,
       displayName: grant.user.displayName,
       access: grant.access,
+      expiresAt: grant.expiresAt,
       createdAt: grant.createdAt,
     }));
   }
@@ -272,6 +393,7 @@ export class DocumentsService {
     documentId: string,
     granteeId: string,
     access: DocumentAccessLevel,
+    expiresAt: Date | null | undefined,
     requestId: string,
   ) {
     const { document } = await this.require(userId, documentId, DocumentAccessLevel.MANAGE);
@@ -303,10 +425,13 @@ export class DocumentsService {
       'GRANTEE_OUTSIDE_GROUP',
       'La persona no pertenece al grupo del documento',
     );
+    if (expiresAt)
+      ensure(expiresAt.getTime() > Date.now(), 422, 'GRANT_EXPIRY', 'La caducidad debe estar en el futuro');
     const grant = await this.repository.upsertGrant(
       documentId,
       granteeId,
       access,
+      expiresAt,
       userId,
       requestId,
     );
@@ -314,6 +439,7 @@ export class DocumentsService {
       userId: grant.userId,
       displayName: grant.user.displayName,
       access: grant.access,
+      expiresAt: grant.expiresAt,
       createdAt: grant.createdAt,
     };
   }
@@ -327,5 +453,131 @@ export class DocumentsService {
   async logs(userId: string, documentId: string) {
     await this.require(userId, documentId, DocumentAccessLevel.MANAGE);
     return this.repository.listLogs(documentId);
+  }
+
+  async pin(userId: string, documentId: string) {
+    await this.require(userId, documentId, DocumentAccessLevel.VIEW);
+    await this.repository.pin(documentId, userId);
+    return { pinned: true };
+  }
+
+  async unpin(userId: string, documentId: string) {
+    await this.require(userId, documentId, DocumentAccessLevel.VIEW);
+    await this.repository.unpin(documentId, userId);
+    return { pinned: false };
+  }
+
+  async createSharedLink(
+    userId: string,
+    documentId: string,
+    input: { expiresAt: string; maxAccesses?: number },
+  ) {
+    await this.require(userId, documentId, DocumentAccessLevel.MANAGE);
+    const expiresAt = new Date(input.expiresAt);
+    ensure(
+      expiresAt.getTime() > Date.now(),
+      422,
+      'SHARED_LINK_EXPIRY',
+      'La caducidad debe estar en el futuro',
+    );
+    ensure(
+      expiresAt.getTime() <= Date.now() + 30 * 24 * 60 * 60 * 1000,
+      422,
+      'SHARED_LINK_EXPIRY',
+      'El enlace no puede durar mas de 30 dias',
+    );
+    const token = randomToken();
+    const link = await this.repository.createSharedLink({
+      documentId,
+      createdById: userId,
+      tokenHash: hashToken(token),
+      expiresAt,
+      ...(input.maxAccesses !== undefined ? { maxAccesses: input.maxAccesses } : {}),
+    });
+    return {
+      ...link,
+      url: `${this.options.publicShareOrigin ?? this.options.publicApiOrigin ?? ''}/share/documents/${encodeURIComponent(token)}`,
+    };
+  }
+
+  async sharedLinks(userId: string, documentId: string) {
+    await this.require(userId, documentId, DocumentAccessLevel.MANAGE);
+    return this.repository.listSharedLinks(documentId);
+  }
+
+  async revokeSharedLink(userId: string, documentId: string, linkId: string) {
+    await this.require(userId, documentId, DocumentAccessLevel.MANAGE);
+    ensure(
+      (await this.repository.revokeSharedLink(documentId, linkId)).count === 1,
+      404,
+      'SHARED_LINK_NOT_FOUND',
+      'Enlace no encontrado',
+    );
+    return { revoked: true };
+  }
+
+  async sharedPreview(token: string) {
+    const link = await this.repository.findSharedLink(hashToken(token), new Date());
+    ensure(link, 404, 'SHARED_LINK_INVALID', 'El enlace no existe, caduco o fue revocado');
+    ensure(
+      link.maxAccesses === null || link.accessCount < link.maxAccesses,
+      404,
+      'SHARED_LINK_INVALID',
+      'El enlace no existe, caduco o fue revocado',
+    );
+    // La consulta pública no devuelve propietario, grupo, asociaciones ni identificadores.
+    return { name: link.document.name };
+  }
+
+  async sharedDownload(token: string, requestId: string) {
+    const consumed = await this.repository.consumeSharedLink(hashToken(token), new Date());
+    ensure(consumed, 404, 'SHARED_LINK_INVALID', 'El enlace no existe, caduco o fue revocado');
+    const bytes = await this.readDocumentBytes(consumed.document);
+    await this.repository.logPublicAccess(consumed.document.id, 'shared_download', requestId);
+    return { document: consumed.document, bytes };
+  }
+
+  async sharedDownloadStream(token: string, requestId: string) {
+    const consumed = await this.repository.consumeSharedLink(hashToken(token), new Date());
+    ensure(consumed, 404, 'SHARED_LINK_INVALID', 'El enlace no existe, caduco o fue revocado');
+    const stream = await this.readDocumentStream(consumed.document);
+    await this.repository.logPublicAccess(consumed.document.id, 'shared_download', requestId);
+    return { document: consumed.document, stream };
+  }
+
+  async runExpiryNotifications(now: Date, notifications: NotificationsService) {
+    const documents = await this.repository.findExpiring(now);
+    for (const document of documents) {
+      if (!document.expiresAt) continue;
+      const recipients = [
+        document.ownerId,
+        ...document.grants.map((grant) => grant.userId),
+        ...(document.group?.members.map((member) => member.userId) ?? []),
+      ];
+      if (document.expiresAt <= now) {
+        await notifications.notify({
+          userIds: recipients,
+          type: 'document.expired',
+          title: `Documento vencido: ${document.name}`,
+          body: 'Este documento ya supero su fecha de vencimiento.',
+          data: { documentId: document.id, expiresAt: document.expiresAt.toISOString() },
+          dedupeKey: `document:${document.id}:expired`,
+        });
+        continue;
+      }
+      for (const days of document.expiryNoticeDays) {
+        const threshold = new Date(document.expiresAt.getTime() - days * 24 * 60 * 60 * 1000);
+        if (now >= threshold) {
+          await notifications.notify({
+            userIds: recipients,
+            type: 'document.expiring',
+            title: `Documento por vencer: ${document.name}`,
+            body: `Vence el ${document.expiresAt.toLocaleDateString('es-ES')} (aviso de ${days} dias).`,
+            data: { documentId: document.id, expiresAt: document.expiresAt.toISOString(), days },
+            dedupeKey: `document:${document.id}:expiring:${days}`,
+          });
+        }
+      }
+    }
   }
 }

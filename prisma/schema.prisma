@@ -93,6 +93,17 @@ enum DocumentAccessLevel {
   MANAGE
 }
 
+enum DocumentCategory {
+  IDENTIDAD
+  VIAJE
+  SEGURO
+  VEHICULO
+  SALUD
+  HOGAR
+  FINANZAS
+  OTRO
+}
+
 enum NotificationStatus {
   UNREAD
   READ
@@ -163,6 +174,11 @@ model User {
   documents               Document[]               @relation("DocumentOwner")
   documentGrants          DocumentAccessGrant[]
   documentLogs            DocumentAccessLog[]
+  documentPins            DocumentPin[]
+  createdDocumentSharedLinks DocumentSharedLink[] @relation("DocumentSharedLinkCreator")
+  documentModuleLock      DocumentModuleLock?
+  documentWebAuthnCredentials DocumentWebAuthnCredential[]
+  documentWebAuthnChallenges DocumentWebAuthnChallenge[]
   pushSubscriptions       PushSubscription[]
   notifications           Notification[]
   achievements            UserAchievement[]
@@ -221,6 +237,7 @@ model Session {
   expiresAt     DateTime
   revokedAt     DateTime?
   lastSeenAt    DateTime  @default(now())
+  documentsUnlockedAt DateTime?
   createdAt     DateTime  @default(now())
   userAgent     String?   @db.VarChar(512)
   ipAddress     String?   @db.VarChar(64)
@@ -770,6 +787,9 @@ model Document {
   groupId        String?               @db.Uuid
   ownerId        String                @db.Uuid
   name           String                @db.VarChar(255)
+  category       DocumentCategory      @default(OTRO)
+  expiresAt      DateTime?
+  expiryNoticeDays Int[]               @default([30, 7])
   storageKey     String                @unique @db.VarChar(512)
   mimeType       String                @db.VarChar(100)
   sizeBytes      Int                   @default(0)
@@ -779,6 +799,12 @@ model Document {
   settlementId   String?               @db.Uuid
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
+  lastAccessedAt DateTime?
+  isLegacy       Boolean               @default(true)
+  encryptionKeyId String?              @db.VarChar(80)
+  encryptionIv   String?               @db.VarChar(64)
+  encryptionTag  String?               @db.VarChar(64)
+  wrappedDataKey String?               @db.Text
   group          Group?                @relation(fields: [groupId], references: [id], onDelete: Cascade)
   owner          User                  @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   event          Event?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
@@ -787,12 +813,17 @@ model Document {
   grants         DocumentAccessGrant[]
   logs           DocumentAccessLog[]
   ocrJobs        OcrJob[]
+  pins           DocumentPin[]
+  sharedLinks    DocumentSharedLink[]
 
   @@index([groupId, createdAt])
   @@index([ownerId, createdAt])
   @@index([eventId])
   @@index([expenseId])
   @@index([settlementId])
+  @@index([expiresAt])
+  @@index([category, createdAt])
+  @@index([lastAccessedAt])
 }
 
 model DocumentAccessGrant {
@@ -800,12 +831,83 @@ model DocumentAccessGrant {
   documentId String              @db.Uuid
   userId     String              @db.Uuid
   access     DocumentAccessLevel
+  expiresAt  DateTime?
   createdAt  DateTime            @default(now())
   document   Document            @relation(fields: [documentId], references: [id], onDelete: Cascade)
   user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([documentId, userId])
   @@index([userId])
+}
+
+model DocumentPin {
+  id         String   @id @default(uuid()) @db.Uuid
+  documentId String   @db.Uuid
+  userId     String   @db.Uuid
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([userId, createdAt])
+}
+
+model DocumentSharedLink {
+  id          String    @id @default(uuid()) @db.Uuid
+  documentId  String    @db.Uuid
+  createdById String    @db.Uuid
+  tokenHash   String    @unique @db.Char(64)
+  expiresAt   DateTime
+  maxAccesses Int?
+  accessCount Int       @default(0)
+  lastAccessAt DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  document    Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("DocumentSharedLinkCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([documentId, revokedAt, expiresAt])
+  @@index([expiresAt])
+}
+
+model DocumentModuleLock {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @unique @db.Uuid
+  pinHash           String?   @db.VarChar(512)
+  pinFailedAttempts Int       @default(0)
+  pinLockedUntil    DateTime?
+  unlockTtlMinutes  Int       @default(10)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DocumentWebAuthnCredential {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  credentialId String   @unique @db.VarChar(512)
+  publicKey    String   @db.Text
+  counter      Int      @default(0)
+  transports   String[] @default([])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model DocumentWebAuthnChallenge {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @db.Uuid
+  type          String    @db.VarChar(20)
+  challengeHash String    @db.Char(64)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, expiresAt])
+  @@index([challengeHash])
 }
 
 model DocumentAccessLog {

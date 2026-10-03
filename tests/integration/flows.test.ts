@@ -567,7 +567,8 @@ describe.skipIf(!TEST_DATABASE_URL)('Integración PostgreSQL: flujo completo de 
     expect(download.headers['content-type']).toBe('image/png');
     expect(download.headers['content-disposition']).toContain('attachment');
     expect(download.headers['x-content-type-options']).toBe('nosniff');
-    expect((await carl.agent.get(`${pathOnly.slice(0, -3)}abc`)).status).toBe(403);
+    // Las descargas pasan por la API autenticada; un documento inexistente no revela si existia.
+    expect((await carl.agent.get(`${pathOnly.slice(0, -3)}abc`)).status).toBe(404);
     const grant = await ana.put(
       `/documents/${state.documentId}/grants/${(await bob.get('/auth/me')).body.data.user.id}`,
       { access: 'EDIT' },

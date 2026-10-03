@@ -62,6 +62,8 @@ const envSchema = z.object({
   RECOVERY_RATE_LIMIT_MAX: positiveInt.default(5),
   INVITATION_RATE_LIMIT_MAX: positiveInt.default(30),
   UPLOAD_RATE_LIMIT_MAX: positiveInt.default(30),
+  SHARED_LINK_RATE_LIMIT_MAX: positiveInt.default(60),
+  DOCUMENT_PIN_RATE_LIMIT_MAX: positiveInt.default(10),
   OCR_RATE_LIMIT_MAX: positiveInt.default(20),
   EXPENSE_RATE_LIMIT_MAX: positiveInt.default(60),
   EVENT_RSVP_RATE_LIMIT_MAX: positiveInt.default(30),
@@ -78,7 +80,7 @@ const envSchema = z.object({
   EMAIL_HTTP_URL: optionalUrl,
   EMAIL_HTTP_API_KEY: optionalSecret,
   EXTERNAL_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(8000),
-  // Documentos: local guarda en disco y firma URLs de descarga con HMAC.
+  // Documentos: local guarda en disco; Docs sirve las descargas desde la API.
   STORAGE_PROVIDER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_DIR: z.string().min(1).default('./storage'),
   STORAGE_SIGNING_SECRET: optionalSecret,
@@ -88,6 +90,11 @@ const envSchema = z.object({
   S3_ACCESS_KEY_ID: optionalString,
   S3_SECRET_ACCESS_KEY: optionalString,
   S3_FORCE_PATH_STYLE: optionalBoolean,
+  S3_SSE: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.enum(['AES256', 'aws:kms']).optional(),
+  ),
+  S3_SSE_KMS_KEY_ID: optionalString,
   SIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(300),
   MAX_UPLOAD_BYTES: z.coerce
     .number()
@@ -95,6 +102,18 @@ const envSchema = z.object({
     .min(1024)
     .max(25 * 1024 * 1024)
     .default(10 * 1024 * 1024),
+  // Cifrado en reposo de documentos: anillo id:base64 de claves maestras de 32 bytes.
+  DOCUMENT_ENCRYPTION_KEYS: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().max(20_000).optional(),
+  ),
+  DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID: optionalString,
+  DOCUMENT_ENCRYPTION_MIGRATE_LEGACY: optionalBoolean.default(false),
+  DOCUMENT_LOCK_UNLOCK_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
+  DOCUMENT_LOCK_PIN_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  DOCUMENT_LOCK_PIN_LOCK_MINUTES: z.coerce.number().int().min(1).max(120).default(15),
+  WEBAUTHN_RP_ID: optionalString,
+  WEBAUTHN_ORIGIN: optionalUrl,
   // OCR: disabled falla de forma explícita; http delega en un servicio externo.
   OCR_PROVIDER: z.enum(['disabled', 'http', 'local', 'tesseract']).default('disabled'),
   OCR_HTTP_URL: optionalUrl,
@@ -172,6 +191,12 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
     googleEnabled: Boolean(
       env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI,
     ),
+    documentEncryptionKeys: parseDocumentEncryptionKeys(env.DOCUMENT_ENCRYPTION_KEYS),
+    documentEncryptionActiveKeyId: env.DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID,
+    documentLockUnlockMs: env.DOCUMENT_LOCK_UNLOCK_MINUTES * 60 * 1000,
+    documentLockPinLockMs: env.DOCUMENT_LOCK_PIN_LOCK_MINUTES * 60 * 1000,
+    webauthnRpId: env.WEBAUTHN_RP_ID ?? new URL(env.APP_ORIGIN).hostname,
+    webauthnOrigin: env.WEBAUTHN_ORIGIN ?? env.APP_ORIGIN,
   };
 
   if (
@@ -190,6 +215,8 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
   if (config.googleEnabled && isProduction && !env.GOOGLE_REDIRECT_URI!.startsWith('https://')) {
     fail('GOOGLE_REDIRECT_URI de produccion debe usar HTTPS');
   }
+  if (isProduction && !config.corsOrigins.includes(config.webauthnOrigin))
+    fail('WEBAUTHN_ORIGIN debe estar incluido en CORS_ORIGINS en produccion');
   if (env.RATE_LIMIT_STORE === 'redis' && !env.REDIS_URL)
     fail('REDIS_URL es obligatorio con redis');
   if (isProduction && env.RATE_LIMIT_STORE !== 'redis') {
@@ -226,6 +253,16 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
         'STORAGE_PROVIDER=s3 requiere S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID y S3_SECRET_ACCESS_KEY',
       );
     }
+    if (env.S3_SSE === 'aws:kms' && !env.S3_SSE_KMS_KEY_ID)
+      fail('S3_SSE=aws:kms requiere S3_SSE_KMS_KEY_ID');
+  }
+  if (isProduction && config.documentEncryptionKeys.size === 0)
+    fail('produccion requiere DOCUMENT_ENCRYPTION_KEYS con al menos una clave');
+  if (config.documentEncryptionKeys.size > 0) {
+    if (!config.documentEncryptionActiveKeyId)
+      fail('DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID es obligatorio al configurar el anillo');
+    if (!config.documentEncryptionKeys.has(config.documentEncryptionActiveKeyId))
+      fail('DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID no existe en DOCUMENT_ENCRYPTION_KEYS');
   }
   if (env.PUSH_PROVIDER === 'webpush') {
     const vapidPublicKey = env.VAPID_PUBLIC_KEY;
@@ -274,4 +311,21 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
   }
 
   return { ...config, warnings };
+}
+
+/** Analiza el anillo sin incluir nunca el material de clave en errores ni logs. */
+function parseDocumentEncryptionKeys(value: string | undefined): Map<string, Buffer> {
+  const result = new Map<string, Buffer>();
+  if (!value) return result;
+  for (const entry of value.split(',')) {
+    const [id, encoded, extra] = entry.trim().split(':');
+    if (!id || !encoded || extra !== undefined || !/^[A-Za-z0-9_-]{1,80}$/.test(id))
+      throw new Error('Configuracion invalida: DOCUMENT_ENCRYPTION_KEYS tiene formato invalido');
+    const key = Buffer.from(encoded, 'base64');
+    if (key.length !== 32)
+      throw new Error('Configuracion invalida: cada clave de documentos debe tener 32 bytes');
+    if (result.has(id)) throw new Error('Configuracion invalida: id duplicado en el anillo');
+    result.set(id, key);
+  }
+  return result;
 }

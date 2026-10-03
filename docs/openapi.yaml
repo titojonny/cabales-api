@@ -27,7 +27,7 @@ tags:
   - name: Budgets
     description: 'Presupuestos por periodo con alertas.'
   - name: Documents
-    description: 'Documentos privados con permisos y URLs firmadas.'
+    description: 'Documentos privados con permisos, caducidad, cifrado y bloqueo de módulo.'
   - name: OCR
     description: 'Lectura asíncrona de comprobantes con confirmación humana.'
   - name: Cabudas
@@ -1446,6 +1446,22 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [IDENTIDAD, VIAJE, SEGURO, VEHICULO, SALUD, HOGAR, FINANZAS, OTRO]
+        - name: pinned
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: recent
+          in: query
+          required: false
+          schema:
+            type: boolean
         - name: cursor
           in: query
           required: false
@@ -1523,6 +1539,24 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [IDENTIDAD, VIAJE, SEGURO, VEHICULO, SALUD, HOGAR, FINANZAS, OTRO]
+        - name: expiresAt
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: expiryNoticeDays
+          in: query
+          required: false
+          description: 'Entre 1 y 3 días separados por coma; por defecto 30,7.'
+          schema:
+            type: string
       security:
         - sessionCookie: []
           csrfCookie: []
@@ -1627,12 +1661,319 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/{documentId}/download:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    get:
+      tags: [Documents]
+      summary: 'Descarga tras autorizar y descifrar en la API'
+      operationId: downloadDocument
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Archivo con Content-Disposition attachment, nosniff y CSP sandbox'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                contentMediaType: application/octet-stream
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/documents/{documentId}/pin:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    post:
+      tags: [Documents]
+      summary: 'Fija un documento para acceso rápido'
+      operationId: pinDocument
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Documents]
+      summary: 'Quita un documento de fijados'
+      operationId: unpinDocument
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/{documentId}/shared-links:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    get:
+      tags: [Documents]
+      summary: 'Lista enlaces compartidos y su estado'
+      operationId: listDocumentSharedLinks
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SharedLink' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Documents]
+      summary: 'Crea un enlace temporal de solo lectura'
+      operationId: createDocumentSharedLink
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expiresAt]
+              properties:
+                expiresAt:
+                  type: string
+                  format: date-time
+                maxAccesses:
+                  type: integer
+                  minimum: 1
+                  maximum: 10000
+      responses:
+        '201':
+          description: 'Operación correcta; el token solo se entrega dentro de la URL creada'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/SharedLink' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/{documentId}/shared-links/{linkId}/revoke:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+      - name: linkId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [Documents]
+      summary: 'Revoca inmediatamente un enlace compartido'
+      operationId: revokeDocumentSharedLink
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/lock/status:
+    get:
+      tags: [Documents]
+      summary: 'Consulta el estado del bloqueo de Docs'
+      operationId: getDocumentLockStatus
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Operación correcta'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data: { $ref: '#/components/schemas/DocumentLockStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/documents/lock:
+    put:
+      tags: [Documents]
+      summary: 'Activa o configura el bloqueo con reautenticación'
+      operationId: configureDocumentLock
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentLockSettings' }
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    delete:
+      tags: [Documents]
+      summary: 'Quita el bloqueo con reautenticación'
+      operationId: removeDocumentLock
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/documents/lock/pin:
+    post:
+      tags: [Documents]
+      summary: 'Desbloquea Docs con PIN limitado'
+      operationId: unlockDocumentPin
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pin]
+              properties:
+                pin:
+                  type: string
+                  pattern: '^[0-9]{6,12}$'
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/documents/lock/webauthn/registration-options:
+    post:
+      tags: [Documents]
+      summary: 'Genera opciones de registro WebAuthn'
+      operationId: documentWebAuthnRegistrationOptions
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/documents/lock/webauthn/registration-verify:
+    post:
+      tags: [Documents]
+      summary: 'Verifica el registro WebAuthn'
+      operationId: documentWebAuthnRegistrationVerify
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/documents/lock/webauthn/authentication-options:
+    post:
+      tags: [Documents]
+      summary: 'Genera opciones de autenticación WebAuthn'
+      operationId: documentWebAuthnAuthenticationOptions
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/documents/lock/webauthn/authentication-verify:
+    post:
+      tags: [Documents]
+      summary: 'Verifica una autenticación WebAuthn'
+      operationId: documentWebAuthnAuthenticationVerify
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/documents/{documentId}/download-url:
     parameters:
       - $ref: '#/components/parameters/DocumentId'
     post:
       tags: [Documents]
-      summary: 'Emite una URL firmada de corta duración'
+      summary: 'Emite una URL de la API autenticada para compatibilidad'
       operationId: createDocumentDownloadUrl
       security:
         - sessionCookie: []
@@ -1714,6 +2055,9 @@ paths:
               properties:
                 access:
                   enum: [VIEW, EDIT, MANAGE]
+                expiresAt:
+                  type: [string, 'null']
+                  format: date-time
       responses:
         '200':
           description: 'Operación correcta'
@@ -1796,28 +2140,59 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
-  /api/v1/storage/local/{token}:
+  /api/v1/share/documents/{token}:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
     get:
       tags: [Documents]
-      summary: 'Descarga mediante URL firmada del almacenamiento local'
-      operationId: downloadSignedDocument
-      description: 'El token es HMAC-SHA256 con caducidad; no requiere cookie para poder abrirse en otra pestaña.'
-      parameters:
-        - name: token
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: 'Consulta el nombre de un enlace temporal'
+      operationId: previewSharedDocument
       security: []
       responses:
         '200':
-          description: 'Archivo con Content-Disposition attachment, nosniff y CSP sandbox'
+          description: 'Nombre público del documento'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/share/documents/{token}/download:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{43}$'
+    get:
+      tags: [Documents]
+      summary: 'Descarga un enlace temporal de solo lectura'
+      operationId: downloadSharedDocument
+      security: []
+      responses:
+        '200':
+          description: 'Archivo con Content-Disposition attachment y nosniff'
           content:
             application/octet-stream:
               schema:
                 type: string
                 contentMediaType: application/octet-stream
-        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/ocr/jobs:
@@ -4617,6 +4992,9 @@ components:
         [
           id,
           name,
+          category,
+          expiresAt,
+          expiryNoticeDays,
           mimeType,
           sizeBytes,
           groupId,
@@ -4625,6 +5003,9 @@ components:
           settlementId,
           createdAt,
           updatedAt,
+          lastAccessedAt,
+          isLegacy,
+          isPinned,
           owner,
           access,
         ]
@@ -4634,6 +5015,20 @@ components:
           format: uuid
         name:
           type: string
+        category:
+          type: string
+          enum: [IDENTIDAD, VIAJE, SEGURO, VEHICULO, SALUD, HOGAR, FINANZAS, OTRO]
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+        expiryNoticeDays:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: integer
+            minimum: 1
+            maximum: 365
         mimeType:
           enum: [application/pdf, image/jpeg, image/png, image/webp]
         sizeBytes:
@@ -4656,6 +5051,13 @@ components:
         updatedAt:
           type: string
           format: date-time
+        lastAccessedAt:
+          type: [string, 'null']
+          format: date-time
+        isLegacy:
+          type: boolean
+        isPinned:
+          type: boolean
         owner:
           type: object
           required: [id, displayName]
@@ -4685,10 +5087,24 @@ components:
         settlementId:
           type: [string, 'null']
           format: uuid
+        category:
+          type: string
+          enum: [IDENTIDAD, VIAJE, SEGURO, VEHICULO, SALUD, HOGAR, FINANZAS, OTRO]
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+        expiryNoticeDays:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: integer
+            minimum: 1
+            maximum: 365
       minProperties: 1
     DocumentGrant:
       type: object
-      required: [userId, displayName, access, createdAt]
+      required: [userId, displayName, access, expiresAt, createdAt]
       properties:
         userId:
           type: string
@@ -4697,9 +5113,76 @@ components:
           type: string
         access:
           enum: [VIEW, EDIT, MANAGE]
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
         createdAt:
           type: string
           format: date-time
+    SharedLink:
+      type: object
+      required: [id, expiresAt, maxAccesses, accessCount, lastAccessAt, revokedAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        maxAccesses:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 10000
+        accessCount:
+          type: integer
+          minimum: 0
+        lastAccessAt:
+          type: [string, 'null']
+          format: date-time
+        revokedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        url:
+          type: string
+          format: uri
+    DocumentLockStatus:
+      type: object
+      required: [enabled, pinEnabled, webauthnEnabled, webauthnAvailable, unlockedUntil, unlockTtlMinutes]
+      properties:
+        enabled:
+          type: boolean
+        pinEnabled:
+          type: boolean
+        webauthnEnabled:
+          type: boolean
+        webauthnAvailable:
+          type: boolean
+        unlockedUntil:
+          type: [string, 'null']
+          format: date-time
+        unlockTtlMinutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+    DocumentLockSettings:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password:
+          type: string
+          minLength: 1
+          maxLength: 200
+        pin:
+          type: [string, 'null']
+          pattern: '^[0-9]{6,12}$'
+        unlockTtlMinutes:
+          type: integer
+          minimum: 1
+          maximum: 60
     OcrProposal:
       type: object
       required: [items]

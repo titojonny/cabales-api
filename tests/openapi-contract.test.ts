@@ -83,6 +83,13 @@ function implementedRoutes() {
     const scopedSource = extra.from ? source.slice(source.indexOf(extra.from)) : source;
     collectRoutes(routes, scopedSource, extra.prefix);
   }
+  const sharedRouter = readFileSync(
+    path.join(modules, 'documents', 'document-shared.router.ts'),
+    'utf8',
+  );
+  for (const match of sharedRouter.matchAll(ROUTE)) {
+    routes.add(`${match[1]!.toUpperCase()} ${normalize(`/api/v1/share/documents${match[2]}`)}`);
+  }
   return routes;
 }
 

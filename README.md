@@ -144,12 +144,14 @@ pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema
 - `COOKIE_NAME`: nombre de la cookie HttpOnly.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI`: cliente OIDC opcional; deben existir juntos para habilitar Google. El redirect local es `http://localhost:3000/api/v1/auth/google/callback` y en produccion debe ser el URI HTTPS exacto registrado en Google Cloud.
 - `RATE_LIMIT_STORE` (`memory`|`redis`) y `REDIS_URL`: store de límites; producción exige Redis compartido y el arranque falla sin él. Si Redis cae, los límites sensibles fallan cerrados (503) y el global deja pasar.
-- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `EXPENSE_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario), `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario) e `INCOME_RATE_LIMIT_MAX` (operaciones de ingresos personales por usuario).
+- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `SHARED_LINK_RATE_LIMIT_MAX`, `DOCUMENT_PIN_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `EXPENSE_RATE_LIMIT_MAX`, `EVENT_RSVP_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario), `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario) e `INCOME_RATE_LIMIT_MAX` (operaciones de ingresos personales por usuario).
 - `SCHEDULER_ENABLED`, `SCHEDULER_INTERVAL_SECONDS`, `SCHEDULER_LOCK_TTL_SECONDS` y `SCHEDULER_MAX_ATTEMPTS`: habilitación, frecuencia, TTL del lock y reintentos acotados del planificador. En producción no se debe desactivar el job de recordatorios.
-- `APP_ORIGIN` y `PUBLIC_API_ORIGIN`: bases de enlaces de correo y de URLs firmadas.
+- `APP_ORIGIN` y `PUBLIC_API_ORIGIN`: bases de enlaces de correo y del endpoint autenticado de descargas.
 - `EMAIL_VERIFICATION_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`, `INVITATION_TTL_DAYS`: vigencia de enlaces de un solo uso.
 - `EMAIL_PROVIDER` (`logging`|`http`), `EMAIL_FROM`, `EMAIL_HTTP_URL`, `EMAIL_HTTP_API_KEY`: correo transaccional; `logging` no envía ni registra contenido.
-- `STORAGE_PROVIDER` (`local`|`s3`), `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET` (≥32 caracteres en producción local), `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `SIGNED_URL_TTL_SECONDS`, `MAX_UPLOAD_BYTES`. S3 funciona con MinIO y nunca devuelve URLs permanentes.
+- `STORAGE_PROVIDER` (`local`|`s3`), `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET` (≥32 caracteres en producción local), `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_SSE` (`AES256`|`aws:kms`), `S3_SSE_KMS_KEY_ID`, `SIGNED_URL_TTL_SECONDS`, `MAX_UPLOAD_BYTES`. Docs no entrega URLs directas de S3.
+- `DOCUMENT_ENCRYPTION_KEYS` (anillo `id:base64_de_32_bytes` separado por comas), `DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID` y `DOCUMENT_ENCRYPTION_MIGRATE_LEGACY`; el anillo es obligatorio en producción y sus valores solo viven en el entorno.
+- `DOCUMENT_LOCK_UNLOCK_MINUTES`, `DOCUMENT_LOCK_PIN_MAX_ATTEMPTS`, `DOCUMENT_LOCK_PIN_LOCK_MINUTES`, `WEBAUTHN_RP_ID` y `WEBAUTHN_ORIGIN`: duración, límites y configuración de passkeys del bloqueo de Docs.
 - `OCR_PROVIDER` (`disabled`|`local`|`http`|`tesseract`), `OCR_HTTP_URL`, `OCR_HTTP_API_KEY`, `OCR_TESSERACT_LANGS` (por defecto `spa+eng`), `OCR_TESSERACT_LANG_PATH` y `OCR_MAX_ATTEMPTS`; `tesseract` es OCR real local para imágenes y rechaza PDF, mientras `local` es determinista solo para desarrollo/pruebas y falla en producción. `PUSH_PROVIDER` (`disabled`|`webpush`), `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`; la privada solo existe en el entorno del servidor.
 - `STATISTICS_EXPORT_MAX_ROWS` y `STATISTICS_EXPORT_RATE_LIMIT_MAX`: límite de filas y solicitudes de la exportación CSV.
 - `PRIVACY_EXPORT_TTL_DAYS` y `RETENTION_*_DAYS`: plazos provisionales de exportación y retención; deben confirmarse legalmente.
@@ -187,7 +189,7 @@ Endpoints públicos:
 - `GET /health`, `GET /ready`
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/config`, `GET /api/v1/auth/google/start` y `GET /api/v1/auth/google/callback`
 - `POST /api/v1/auth/email-verification/{request,resend,confirm}` y `POST /api/v1/auth/password-recovery/{request,resend,confirm}`: request/resend responden 202 idéntico exista o no la cuenta.
-- `GET /api/v1/storage/local/:token`: descarga con URL firmada de corta duración.
+- `GET /api/v1/share/documents/:token`: vista pública mínima de un enlace de solo lectura; la descarga siempre pasa por la API.
 
 Endpoints autenticados:
 
@@ -237,7 +239,7 @@ Prisma no genera restricciones `CHECK`. Los servicios MVP verifican positividad,
 
 - Contraseñas con Argon2id y salt administrado por la biblioteca.
 - Tokens de sesión, invitación, verificación y recuperación aleatorios; PostgreSQL conserva solo SHA-256. Los enlaces de correo llevan el token en el fragmento `#token=` para que no llegue a logs ni Referer. Recuperar contraseña revoca todas las sesiones.
-- Documentos: tipo permitido validado contra la firma binaria, nombre saneado, clave opaca nunca expuesta, descarga con `Content-Disposition: attachment`, `nosniff` y CSP `sandbox`. Sin acceso se responde 404 para no revelar existencia.
+- Documentos: tipo permitido validado contra la firma binaria, nombre saneado, clave opaca nunca expuesta, AES-256-GCM opcional en desarrollo y obligatorio en producción, descarga autorizada/descifrada por la API con `Content-Disposition: attachment`, `nosniff` y CSP `sandbox`. Sin acceso se responde 404 para no revelar existencia.
 - Exportación de privacidad sin secretos, IP, user-agent ni datos personales de terceros. La supresión exige contraseña, anonimiza y conserva la integridad financiera de los demás.
 - Sesiones expirables y revocables en cookie `HttpOnly`, `SameSite=Lax` y `Secure` en producción.
 - Token CSRF por sesión en cabecera y cookie separada, comparado en tiempo constante.
@@ -295,7 +297,7 @@ pnpm format:check
 
 Para `prisma validate` basta una URL PostgreSQL sintácticamente válida; no abre una conexión.
 
-La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contra PostgreSQL real, registro y verificación, invitaciones (duplicado, reenvío, revocación, vista previa, aceptación), categorías, presupuesto con alerta, gasto, Cabudas antes y después del cierre, pago, estadísticas, fondos (idempotencia, permisos, retiros concurrentes sin saldo negativo), documentos (firma binaria, permisos, URL firmada), OCR con confirmación, logros, avisos, exportación y supresión de privacidad, recuperación de contraseña y retención; y con Redis, límites compartidos entre dos instancias.
+La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contra PostgreSQL real, registro y verificación, invitaciones (duplicado, reenvío, revocación, vista previa, aceptación), categorías, presupuesto con alerta, gasto, Cabudas antes y después del cierre, pago, estadísticas, fondos (idempotencia, permisos, retiros concurrentes sin saldo negativo), Docs P5 (cifrado, descifrado por API, tag manipulado, fijados, enlaces caducables/revocables/limitados y bloqueo), OCR con confirmación, logros, avisos, exportación y supresión de privacidad, recuperación de contraseña y retención; y con Redis, límites compartidos entre dos instancias.
 
 ## Límites actuales
 
@@ -324,6 +326,15 @@ Las categorias personales se sirven en `GET|POST /categories` y se pueden editar
 La migración `20261004010000_p4_gastos_personales_recurrentes_etiquetas` permite gastos sin grupo ni evento, siempre ligados a `ownerUserId`. Las rutas personales son `GET|POST /expenses`, `GET|PATCH|DELETE /expenses/:expenseId`, `GET|POST /tags` y `GET|POST /recurring-expenses`; las rutas grupales añadidas son `/groups/:groupId/tags` y `/groups/:groupId/recurring-expenses`. El historial acepta `month`, `from`, `to`, `categoryId`, `tagId`, `groupId`, `text`, `scope`, `cursor` y `limit`, y devuelve la suma filtrada en `meta.total`.
 
 El job `recurring-expenses` reutiliza el planificador P3. Cada ejecución usa una clave de periodo única en `Expense`, bloquea el recurrente y pausa con notificación si el evento grupal está cerrado o la plantilla dejó de ser válida. No hay variables de entorno nuevas.
+## P5: Docs seguro
+
+Docs admite las categorías fijas `IDENTIDAD`, `VIAJE`, `SEGURO`, `VEHICULO`, `SALUD`, `HOGAR`, `FINANZAS` y `OTRO`, filtros, fijados, recientes y `expiresAt` con avisos por defecto a 30 y 7 días. El job `document-expiry-notifications` emite `document.expiring`/`document.expired` con claves idempotentes.
+
+Las concesiones pueden caducar y los enlaces de solo lectura tienen token aleatorio almacenado solo como hash, máximo 30 días, límite de accesos, revocación, rate limit y bitácora. La página pública solo presenta el nombre y la descarga.
+
+Las subidas nuevas usan AES-256-GCM con sobre por documento cuando existe el anillo `DOCUMENT_ENCRYPTION_KEYS`; en producción es obligatorio. `DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID` selecciona la clave activa. `S3_SSE=AES256` o `aws:kms` añade cifrado del proveedor. `GET /documents/:documentId/download` y los enlaces públicos descifran en streaming tras autorizar; `pnpm docs:rotate-keys` reenvuelve las claves de datos y puede migrar legacy con `DOCUMENT_ENCRYPTION_MIGRATE_LEGACY=true`.
+
+El bloqueo de Docs usa PIN Argon2id y/o WebAuthn, ligado a la sesión por `documentsUnlockedAt`; el desbloqueo se pierde al cerrar sesión. `WEBAUTHN_RP_ID` y `WEBAUTHN_ORIGIN` se derivan de `APP_ORIGIN` si no se configuran.
 
 ## Principios aplicados
 
