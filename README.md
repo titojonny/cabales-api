@@ -48,6 +48,7 @@ El dominio de dinero y liquidación no importa Express ni Prisma. Los repositori
 1. Crear la configuración local a partir de `.env.example` y cambiar cualquier credencial compartida.
 2. Iniciar PostgreSQL con `docker compose up -d postgres` o usar una instancia aislada propia. `docker compose up --build api` levanta Express en el puerto 3000.
 3. Instalar exactamente el lockfile con `pnpm install --frozen-lockfile`.
+   El bloque `allowBuilds` de `pnpm-workspace.yaml` autoriza los scripts de instalación necesarios de Prisma, `argon2`, `esbuild` y `tesseract.js`.
 4. Aplicar las migraciones versionadas con `pnpm db:migrate` (recomendado también en desarrollo). `pnpm db:push` solo sirve para prototipos desechables.
 5. Insertar catálogos públicos con `pnpm db:seed`.
 6. Iniciar desarrollo con `pnpm dev`.
