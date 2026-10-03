@@ -147,6 +147,36 @@ export class FundsRepository {
     return this.db.fund.update({ where: { id: fundId }, data, select: fundView });
   }
 
+  /** Archiva bajo el mismo bloqueo que serializa los movimientos del fondo. */
+  archiveAtomic(fundId: string) {
+    return withSerializableRetry(() =>
+      this.db.$transaction(
+        async (tx) => {
+          const locked = await tx.$queryRaw<Array<{ archivedAt: Date | null }>>(
+            Prisma.sql`SELECT "archivedAt" FROM "Fund" WHERE "id" = ${fundId}::uuid FOR UPDATE`,
+          );
+          if (!locked[0]) return { outcome: 'NOT_FOUND' as const };
+          if (locked[0].archivedAt) return { outcome: 'ALREADY_ARCHIVED' as const };
+          const balance =
+            (
+              await tx.fundMovement.aggregate({
+                where: { fundId },
+                _sum: { amountCents: true },
+              })
+            )._sum.amountCents ?? 0;
+          if (balance !== 0) return { outcome: 'NON_ZERO' as const };
+          const fund = await tx.fund.update({
+            where: { id: fundId },
+            data: { archivedAt: new Date() },
+            select: fundView,
+          });
+          return { outcome: 'ARCHIVED' as const, fund };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ),
+    );
+  }
+
   countManagers(fundId: string) {
     return this.db.fundMember.count({ where: { fundId, role: FundRole.MANAGER } });
   }
@@ -158,8 +188,32 @@ export class FundsRepository {
     });
   }
 
-  updateMember(fundId: string, memberId: string, role: FundRole) {
-    return this.db.fundMember.updateMany({ where: { id: memberId, fundId }, data: { role } });
+  /** Cambia el rol bajo el bloqueo del fondo para no dejarlo sin gestores concurrentemente. */
+  updateMemberAtomic(fundId: string, memberId: string, role: FundRole) {
+    return withSerializableRetry(() =>
+      this.db.$transaction(
+        async (tx) => {
+          const locked = await tx.$queryRaw<Array<{ id: string }>>(
+            Prisma.sql`SELECT "id" FROM "Fund" WHERE "id" = ${fundId}::uuid FOR UPDATE`,
+          );
+          if (!locked[0]) return { outcome: 'NOT_FOUND' as const };
+          const member = await tx.fundMember.findFirst({
+            where: { id: memberId, fundId },
+            select: { id: true, role: true, groupMemberId: true },
+          });
+          if (!member) return { outcome: 'NOT_FOUND' as const };
+          if (member.role === FundRole.MANAGER && role !== FundRole.MANAGER) {
+            const managers = await tx.fundMember.count({
+              where: { fundId, role: FundRole.MANAGER },
+            });
+            if (managers <= 1) return { outcome: 'LAST_MANAGER' as const };
+          }
+          await tx.fundMember.update({ where: { id: memberId }, data: { role } });
+          return { outcome: 'UPDATED' as const, member: { ...member, role } };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ),
+    );
   }
 
   findMember(fundId: string, memberId: string) {
@@ -169,8 +223,32 @@ export class FundsRepository {
     });
   }
 
-  removeMember(fundId: string, memberId: string) {
-    return this.db.fundMember.deleteMany({ where: { id: memberId, fundId } });
+  /** Elimina un miembro bajo el mismo bloqueo y conserva al menos un gestor. */
+  removeMemberAtomic(fundId: string, memberId: string) {
+    return withSerializableRetry(() =>
+      this.db.$transaction(
+        async (tx) => {
+          const locked = await tx.$queryRaw<Array<{ id: string }>>(
+            Prisma.sql`SELECT "id" FROM "Fund" WHERE "id" = ${fundId}::uuid FOR UPDATE`,
+          );
+          if (!locked[0]) return { outcome: 'NOT_FOUND' as const };
+          const member = await tx.fundMember.findFirst({
+            where: { id: memberId, fundId },
+            select: { role: true },
+          });
+          if (!member) return { outcome: 'NOT_FOUND' as const };
+          if (member.role === FundRole.MANAGER) {
+            const managers = await tx.fundMember.count({
+              where: { fundId, role: FundRole.MANAGER },
+            });
+            if (managers <= 1) return { outcome: 'LAST_MANAGER' as const };
+          }
+          await tx.fundMember.delete({ where: { id: memberId } });
+          return { outcome: 'REMOVED' as const };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ),
+    );
   }
 
   movements(fundId: string, cursor: string | undefined, limit: number) {

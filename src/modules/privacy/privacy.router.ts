@@ -49,7 +49,7 @@ export function createPrivacyRouter(
       sendData(res, result);
     },
   );
-  router.post('/requests/:requestId/cancel', async (req, res) => {
+  router.post('/requests/:requestId/cancel', limited, async (req, res) => {
     sendData(
       res,
       await service.cancel(req.auth!.userId, uuidParam(req.params['requestId']), req.requestId),

@@ -207,6 +207,8 @@ describe('Web Push', () => {
         contentEncoding: 'aes128gcm',
         ttl: '3600',
       });
+      expect(received[0]?.body).toEqual(expect.any(String));
+      expect(received[0]?.body).not.toHaveLength(0);
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

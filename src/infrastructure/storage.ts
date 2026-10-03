@@ -1,7 +1,12 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ExternalProviderError } from './errors.js';
 
@@ -87,7 +92,7 @@ export class LocalFileStorageProvider implements FileStorageProvider {
   }
 
   signedDownloadUrl(claims: Omit<SignedObjectClaims, 'expiresAt'>, ttlSeconds: number) {
-    const expiresAt = Date.now() + ttlSeconds * 1000;
+    const expiresAt = Date.now() + Math.max(30, Math.min(ttlSeconds, 900)) * 1000;
     const payload = Buffer.from(JSON.stringify({ ...claims, expiresAt })).toString('base64url');
     const token = `${payload}.${this.sign(payload)}`;
     return {
@@ -107,8 +112,18 @@ export class LocalFileStorageProvider implements FileStorageProvider {
       const claims = JSON.parse(
         Buffer.from(payload, 'base64url').toString('utf8'),
       ) as SignedObjectClaims;
-      if (typeof claims.expiresAt !== 'number' || claims.expiresAt <= now) return null;
-      if (typeof claims.key !== 'string' || typeof claims.mimeType !== 'string') return null;
+      if (
+        typeof claims.expiresAt !== 'number' ||
+        !Number.isFinite(claims.expiresAt) ||
+        claims.expiresAt <= now
+      )
+        return null;
+      if (
+        typeof claims.key !== 'string' ||
+        typeof claims.fileName !== 'string' ||
+        typeof claims.mimeType !== 'string'
+      )
+        return null;
       return claims;
     } catch {
       return null;
@@ -235,7 +250,7 @@ export class S3FileStorageProvider implements FileStorageProvider {
 
   async signedDownloadUrl(claims: Omit<SignedObjectClaims, 'expiresAt'>, ttlSeconds: number) {
     this.validateKey(claims.key);
-    const expiresIn = Math.max(30, Math.min(ttlSeconds, 3600));
+    const expiresIn = Math.max(30, Math.min(ttlSeconds, 900));
     try {
       const url = await getSignedUrl(
         this.client,

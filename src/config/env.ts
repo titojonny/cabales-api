@@ -48,6 +48,7 @@ const envSchema = z.object({
   UPLOAD_RATE_LIMIT_MAX: positiveInt.default(30),
   OCR_RATE_LIMIT_MAX: positiveInt.default(20),
   PRIVACY_RATE_LIMIT_MAX: positiveInt.default(10),
+  PUSH_SUBSCRIPTION_RATE_LIMIT_MAX: positiveInt.default(20),
   EMAIL_VERIFICATION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(120).default(30),
   INVITATION_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
@@ -69,7 +70,7 @@ const envSchema = z.object({
   S3_ACCESS_KEY_ID: optionalString,
   S3_SECRET_ACCESS_KEY: optionalString,
   S3_FORCE_PATH_STYLE: optionalBoolean,
-  SIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+  SIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(900).default(300),
   MAX_UPLOAD_BYTES: z.coerce
     .number()
     .int()
@@ -115,9 +116,9 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
   }
   const env = parsed.data;
   const isProduction = env.NODE_ENV === 'production';
-  const fail = (message: string): never => {
+  function fail(message: string): never {
     throw new Error(`Configuracion invalida: ${message}`);
-  };
+  }
 
   const config = {
     ...env,
@@ -166,7 +167,7 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
     fail('OCR_PROVIDER=http requiere OCR_HTTP_URL');
   if (env.OCR_PROVIDER === 'local' && isProduction)
     fail(
-      'OCR_PROVIDER=local esta reservado para desarrollo y pruebas; produccion debe rechazar datos ficticios',
+      'OCR_PROVIDER=local solo para desarrollo y pruebas; produccion debe rechazar datos ficticios',
     );
   if (env.STORAGE_PROVIDER === 's3') {
     if (
@@ -185,16 +186,25 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
     const vapidPublicKey = env.VAPID_PUBLIC_KEY;
     const vapidPrivateKey = env.VAPID_PRIVATE_KEY;
     const vapidSubject = env.VAPID_SUBJECT;
-    if (!vapidPublicKey || !vapidPrivateKey || !vapidSubject)
+    if (
+      typeof vapidPublicKey !== 'string' ||
+      typeof vapidPrivateKey !== 'string' ||
+      typeof vapidSubject !== 'string'
+    ) {
       fail('PUSH_PROVIDER=webpush requiere VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y VAPID_SUBJECT');
+    }
     if (
       !/^[A-Za-z0-9_-]{40,200}$/.test(vapidPublicKey) ||
       !/^[A-Za-z0-9_-]{30,200}$/.test(vapidPrivateKey)
     ) {
       fail('VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY deben ser claves base64url validas');
     }
-    if (!vapidSubject.startsWith('mailto:') && !/^https?:\/\//i.test(vapidSubject))
-      fail('VAPID_SUBJECT debe ser mailto:... o una URL https/http');
+    if (
+      !vapidSubject.startsWith('mailto:') &&
+      !/^https:\/\//i.test(vapidSubject) &&
+      !(!isProduction && /^http:\/\//i.test(vapidSubject))
+    )
+      fail('VAPID_SUBJECT debe ser mailto:... o una URL https');
   }
   if (
     isProduction &&

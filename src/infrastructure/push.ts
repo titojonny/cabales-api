@@ -154,7 +154,7 @@ export class WebPushProvider implements NotificationPushProvider {
       headers: Object.fromEntries(
         Object.entries(request.headers).map(([name, value]) => [name, String(value)]),
       ),
-      body: request.body,
+      body: new Uint8Array(request.body),
       signal: AbortSignal.timeout(this.options.timeoutMs),
     });
     if (response.ok) return;

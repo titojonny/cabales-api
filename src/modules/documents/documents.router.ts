@@ -21,11 +21,17 @@ import { contentDisposition, type DocumentsService } from './documents.service.j
 /** Biblioteca de documentos; la subida recibe el binario crudo con su Content-Type. */
 export function createDocumentsRouter(
   service: DocumentsService,
-  options: { maxBytes: number; uploadLimit?: RequestHandler },
+  options: {
+    maxBytes: number;
+    uploadLimit?: RequestHandler;
+    downloadUrlLimit?: RequestHandler;
+  },
 ): Router {
   const router = Router();
   const raw = express.raw({ type: Object.keys(ALLOWED_DOCUMENT_TYPES), limit: options.maxBytes });
   const uploadLimit: RequestHandler = options.uploadLimit ?? ((_req, _res, next) => next());
+  const downloadUrlLimit: RequestHandler =
+    options.downloadUrlLimit ?? ((_req, _res, next) => next());
 
   router.post('/', uploadLimit, validateQuery(uploadQuerySchema), raw, async (req, res) => {
     const mimeType = (req.header('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
@@ -66,7 +72,7 @@ export function createDocumentsRouter(
     await service.remove(req.auth!.userId, uuidParam(req.params['documentId']), req.requestId);
     sendData(res, { deleted: true });
   });
-  router.post('/:documentId/download-url', async (req, res) => {
+  router.post('/:documentId/download-url', downloadUrlLimit, async (req, res) => {
     sendData(
       res,
       await service.downloadUrl(

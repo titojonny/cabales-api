@@ -120,10 +120,27 @@ export class GroupsRepository {
             Prisma.sql`SELECT "id" FROM "Group" WHERE "id" = ${groupId}::uuid FOR UPDATE`,
           );
           if (!locked[0]) return 'NOT_FOUND' as const;
-          const events = await tx.event.count({ where: { groupId } });
-          const expenses = await tx.expense.count({ where: { groupId } });
-          const settlements = await tx.settlement.count({ where: { groupId } });
-          if (events + expenses + settlements > 0) return 'NOT_EMPTY' as const;
+          const [members, invitations, events, expenses, settlements, funds, budgets, recurring, documents, categories, tags] =
+            await Promise.all([
+              tx.groupMember.count({ where: { groupId } }),
+              tx.groupInvitation.count({ where: { groupId } }),
+              tx.event.count({ where: { groupId } }),
+              tx.expense.count({ where: { groupId } }),
+              tx.settlement.count({ where: { groupId } }),
+              tx.fund.count({ where: { groupId } }),
+              tx.budget.count({ where: { groupId } }),
+              tx.recurringExpense.count({ where: { groupId } }),
+              tx.document.count({ where: { groupId } }),
+              tx.category.count({ where: { groupId } }),
+              tx.tag.count({ where: { groupId } }),
+            ]);
+          // Solo se puede borrar el grupo que conserva únicamente a su propietario y ningún dato asociado.
+          if (
+            members > 1 ||
+            invitations + events + expenses + settlements + funds + budgets + recurring + documents + categories + tags >
+              0
+          )
+            return 'NOT_EMPTY' as const;
           await tx.group.delete({ where: { id: groupId } });
           return 'DELETED' as const;
         },

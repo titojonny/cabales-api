@@ -17,6 +17,7 @@ describe('loadConfig', () => {
     expect(config.RATE_LIMIT_STORE).toBe('memory');
     expect(config.EMAIL_PROVIDER).toBe('logging');
     expect(config.OCR_PROVIDER).toBe('disabled');
+    expect(config.PUSH_SUBSCRIPTION_RATE_LIMIT_MAX).toBe(20);
     expect(config.retention.tokensMs).toBe(7 * 86_400_000);
   });
 
@@ -48,6 +49,19 @@ describe('loadConfig', () => {
     );
     expect(() => loadConfig({ ...base, PUSH_PROVIDER: 'webpush' })).toThrow(/VAPID_PUBLIC_KEY/);
     expect(() => loadConfig({ ...base, STORAGE_PROVIDER: 's3' })).toThrow(/S3_ENDPOINT/);
+  });
+
+  it('limita la vida de URLs firmadas y exige HTTPS para VAPID en produccion', () => {
+    expect(() => loadConfig({ ...base, SIGNED_URL_TTL_SECONDS: '3600' })).toThrow();
+    expect(() =>
+      loadConfig({
+        ...production,
+        PUSH_PROVIDER: 'webpush',
+        VAPID_PUBLIC_KEY: 'a'.repeat(40),
+        VAPID_PRIVATE_KEY: 'b'.repeat(30),
+        VAPID_SUBJECT: 'http://push.example.com',
+      }),
+    ).toThrow(/VAPID_SUBJECT/);
   });
 
   it('advierte sin fallar si producción usa correo de registro local', () => {

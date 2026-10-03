@@ -134,16 +134,27 @@ export class FundsService {
   }
 
   async archive(userId: string, groupId: string, fundId: string) {
-    const { fund } = await this.requireManage(userId, groupId, fundId);
-    ensure(!fund.archivedAt, 409, 'FUND_ARCHIVED', 'El fondo ya esta archivado');
-    const balance = (await this.repository.balances([fundId])).get(fundId) ?? 0;
+    const context = await this.requireManage(userId, groupId, fundId);
+    const result = await this.repository.archiveAtomic(fundId);
+    ensure(result.outcome !== 'NOT_FOUND', 404, 'FUND_NOT_FOUND', 'Fondo no encontrado');
     ensure(
-      balance === 0,
+      result.outcome !== 'ALREADY_ARCHIVED',
+      409,
+      'FUND_ARCHIVED',
+      'El fondo ya esta archivado',
+    );
+    ensure(
+      result.outcome !== 'NON_ZERO',
       409,
       'FUND_BALANCE_NOT_ZERO',
       'Retira o ajusta el saldo a cero antes de archivar',
     );
-    return this.repository.update(fundId, { archivedAt: new Date() });
+    return {
+      ...result.fund,
+      balanceCents: 0,
+      myRole: context.role,
+      canManage: context.canManage,
+    };
   }
 
   async addMember(
@@ -180,16 +191,15 @@ export class FundsService {
     await this.requireManage(userId, groupId, fundId);
     const member = await this.repository.findMember(fundId, memberId);
     ensure(member, 404, 'FUND_MEMBER_NOT_FOUND', 'Miembro no encontrado');
-    if (member.role === FundRole.MANAGER && role !== FundRole.MANAGER) {
-      ensure(
-        (await this.repository.countManagers(fundId)) > 1,
-        409,
-        'LAST_MANAGER',
-        'El fondo necesita al menos un administrador',
-      );
-    }
-    await this.repository.updateMember(fundId, memberId, role);
-    return { ...member, role };
+    const result = await this.repository.updateMemberAtomic(fundId, memberId, role);
+    ensure(result.outcome !== 'NOT_FOUND', 404, 'FUND_MEMBER_NOT_FOUND', 'Miembro no encontrado');
+    ensure(
+      result.outcome !== 'LAST_MANAGER',
+      409,
+      'LAST_MANAGER',
+      'El fondo necesita al menos un administrador',
+    );
+    return result.member;
   }
 
   /** Gestores retiran a otros; cualquier miembro puede salir por sí mismo. */
@@ -200,15 +210,14 @@ export class FundsService {
     const self = member.groupMemberId === context.membership.id;
     if (!self && !context.canManage)
       throw new AppError(403, 'FUND_FORBIDDEN', 'Solo quien administra el fondo puede hacerlo');
-    if (member.role === FundRole.MANAGER) {
-      ensure(
-        (await this.repository.countManagers(fundId)) > 1,
-        409,
-        'LAST_MANAGER',
-        'El fondo necesita al menos un administrador',
-      );
-    }
-    await this.repository.removeMember(fundId, memberId);
+    const result = await this.repository.removeMemberAtomic(fundId, memberId);
+    ensure(result.outcome !== 'NOT_FOUND', 404, 'FUND_MEMBER_NOT_FOUND', 'Miembro no encontrado');
+    ensure(
+      result.outcome !== 'LAST_MANAGER',
+      409,
+      'LAST_MANAGER',
+      'El fondo necesita al menos un administrador',
+    );
   }
 
   async movements(

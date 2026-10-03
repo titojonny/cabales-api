@@ -1,15 +1,24 @@
 import type { GroupRole } from '@prisma/client';
+import express, { type RequestHandler } from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config/env.js';
 import { createLogger } from '../src/config/logger.js';
 import { createApp } from '../src/http/app.js';
+import { createDocumentsRouter } from '../src/modules/documents/documents.router.js';
+import type { DocumentsService } from '../src/modules/documents/documents.service.js';
 import type { AuthContext, AuthPort, SessionResult } from '../src/modules/auth/auth.service.js';
 import type { EventsService } from '../src/modules/events/events.service.js';
 import type { ExpensesService } from '../src/modules/expenses/expenses.service.js';
+import { createGroupsRouter } from '../src/modules/groups/groups.router.js';
 import type { GroupsService } from '../src/modules/groups/groups.service.js';
+import type { NotificationsService } from '../src/modules/notifications/notifications.service.js';
+import { createPrivacyRouter } from '../src/modules/privacy/privacy.router.js';
+import type { PrivacyService } from '../src/modules/privacy/privacy.service.js';
 import type { SettlementsService } from '../src/modules/settlements/settlements.service.js';
 import { hashToken } from '../src/shared/crypto.js';
+
+const base = { DATABASE_URL: 'postgresql://fake:fake@localhost:5432/fake' };
 
 const user = {
   id: '10000000-0000-4000-8000-000000000001',
@@ -26,7 +35,11 @@ const session: SessionResult = {
   expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 };
 
-function fixture(ready = true, env: Record<string, string> = {}) {
+function fixture(
+  ready = true,
+  env: Record<string, string> = {},
+  notifications?: NotificationsService,
+) {
   const auth: AuthPort = {
     register: vi.fn(async () => session),
     login: vi.fn(async () => session),
@@ -69,11 +82,61 @@ function fixture(ready = true, env: Record<string, string> = {}) {
       events: {} as EventsService,
       expenses: {} as ExpensesService,
       settlements: {} as SettlementsService,
+      ...(notifications ? { notifications } : {}),
       readiness: vi.fn(async () => ready),
     }),
     auth,
   };
 }
+
+describe('limites de rutas sensibles', () => {
+  it('corta antes del servicio las URLs de descarga y las operaciones ARCO limitadas', async () => {
+    const limited: RequestHandler = (_req, res) => {
+      res.status(429).json({ success: false, error: { code: 'RATE_LIMITED' } });
+    };
+    const authMiddleware = (app: ReturnType<typeof express>) => {
+      app.use((req, _res, next) => {
+        req.auth = { userId: user.id } as AuthContext;
+        req.requestId = 'test-request';
+        next();
+      });
+      return app;
+    };
+
+    const documents = { downloadUrl: vi.fn() } as unknown as DocumentsService;
+    const documentApp = authMiddleware(express());
+    documentApp.use(
+      '/documents',
+      createDocumentsRouter(documents, { maxBytes: 1024, downloadUrlLimit: limited }),
+    );
+    const documentResponse = await request(documentApp).post(
+      '/documents/10000000-0000-4000-8000-000000000001/download-url',
+    );
+    expect(documentResponse.status).toBe(429);
+    expect(documents.downloadUrl).not.toHaveBeenCalled();
+
+    const groups = { previewInvitation: vi.fn() } as unknown as GroupsService;
+    const groupsApp = authMiddleware(express());
+    groupsApp.use('/groups', createGroupsRouter(groups, { invitations: limited }));
+    const invitationResponse = await request(groupsApp)
+      .post('/groups/invitations/preview')
+      .send({ token: 'x'.repeat(43) });
+    expect(invitationResponse.status).toBe(429);
+    expect(groups.previewInvitation).not.toHaveBeenCalled();
+
+    const privacy = { cancel: vi.fn() } as unknown as PrivacyService;
+    const privacyApp = authMiddleware(express());
+    privacyApp.use(
+      '/privacy',
+      createPrivacyRouter(privacy, loadConfig({ ...base, NODE_ENV: 'test' }), limited),
+    );
+    const privacyResponse = await request(privacyApp).post(
+      '/privacy/requests/20000000-0000-4000-8000-000000000001/cancel',
+    );
+    expect(privacyResponse.status).toBe(429);
+    expect(privacy.cancel).not.toHaveBeenCalled();
+  });
+});
 
 describe('HTTP transversal', () => {
   it('expone health y propaga request ID', async () => {
@@ -226,6 +289,33 @@ describe('HTTP recuperación y límites', () => {
     expect(auth.resetPassword).toHaveBeenCalledOnce();
     const cookies = (response.headers['set-cookie'] as unknown as string[]).join(';');
     expect(cookies).toContain('cabales_session=;');
+  });
+
+  it('limita POST y DELETE de suscripciones push por usuario', async () => {
+    const notifications = {
+      subscribePush: vi.fn(async () => ({ id: 'subscription-id' })),
+      unsubscribePush: vi.fn(async () => undefined),
+    } as unknown as NotificationsService;
+    const { app } = fixture(true, { PUSH_SUBSCRIPTION_RATE_LIMIT_MAX: '1' }, notifications);
+    const cookies = ['cabales_session=session-token', 'cabales_session_csrf=csrf-token'];
+    const subscription = {
+      endpoint: 'https://push.example.test/subscription',
+      keys: { p256dh: 'p'.repeat(20), auth: 'a'.repeat(10) },
+    };
+    const first = await request(app)
+      .post('/api/v1/notifications/push-subscriptions')
+      .set('Cookie', cookies)
+      .set('X-CSRF-Token', 'csrf-token')
+      .send(subscription);
+    expect(first.status).toBe(201);
+    const limitedDelete = await request(app)
+      .delete('/api/v1/notifications/push-subscriptions')
+      .set('Cookie', cookies)
+      .set('X-CSRF-Token', 'csrf-token')
+      .send({ endpoint: subscription.endpoint });
+    expect(limitedDelete.status).toBe(429);
+    expect(limitedDelete.body.error.code).toBe('RATE_LIMITED');
+    expect(notifications.unsubscribePush).not.toHaveBeenCalled();
   });
 
   it('rechaza tokens con caracteres fuera de base64url', async () => {

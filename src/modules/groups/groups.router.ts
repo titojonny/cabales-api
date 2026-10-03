@@ -30,20 +30,33 @@ export function createGroupsRouter(
   router.get('/', async (req, res) => sendData(res, await service.list(req.auth!.userId)));
 
   // Rutas literales antes de /:groupId para que no se interpreten como identificador.
-  router.post('/invitations/preview', validateBody(acceptInvitationSchema), async (req, res) => {
-    sendData(res, await service.previewInvitation(req.auth!.user.email, req.body.token as string));
-  });
-  router.post('/invitations/accept', validateBody(acceptInvitationSchema), async (req, res) => {
-    sendData(
-      res,
-      await service.accept(
-        req.auth!.userId,
-        req.auth!.user.email,
-        req.body.token as string,
-        req.requestId,
-      ),
-    );
-  });
+  router.post(
+    '/invitations/preview',
+    invitationLimit,
+    validateBody(acceptInvitationSchema),
+    async (req, res) => {
+      sendData(
+        res,
+        await service.previewInvitation(req.auth!.user.email, req.body.token as string),
+      );
+    },
+  );
+  router.post(
+    '/invitations/accept',
+    invitationLimit,
+    validateBody(acceptInvitationSchema),
+    async (req, res) => {
+      sendData(
+        res,
+        await service.accept(
+          req.auth!.userId,
+          req.auth!.user.email,
+          req.body.token as string,
+          req.requestId,
+        ),
+      );
+    },
+  );
 
   router.get('/:groupId', async (req, res) => {
     sendData(res, await service.detail(req.auth!.userId, uuidParam(req.params['groupId'])));
@@ -65,6 +78,7 @@ export function createGroupsRouter(
 
   router.get(
     '/:groupId/invitations',
+    invitationLimit,
     validateQuery(invitationListQuerySchema),
     async (req, res) => {
       const { status } = req.validatedQuery as { status?: InvitationStatus };
@@ -102,7 +116,7 @@ export function createGroupsRouter(
       ),
     );
   });
-  router.post('/:groupId/invitations/:invitationId/revoke', async (req, res) => {
+  router.post('/:groupId/invitations/:invitationId/revoke', invitationLimit, async (req, res) => {
     sendData(
       res,
       await service.revokeInvitation(

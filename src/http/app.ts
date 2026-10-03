@@ -214,7 +214,16 @@ export function createApp(dependencies: AppDependencies): Express {
   v1.use(['/auth/email-verification/confirm', '/auth/password-recovery/confirm'], tokenIp);
   v1.use('/auth', createAuthRouter(dependencies.auth, config));
   if (dependencies.localStorage && dependencies.documents) {
-    v1.use('/storage', createLocalStorageRouter(dependencies.localStorage, dependencies.documents));
+    v1.use(
+      '/storage',
+      limit(
+        'document-download',
+        config.UPLOAD_RATE_LIMIT_MAX,
+        'ip',
+        'Demasiadas descargas; espera un momento',
+      ),
+      createLocalStorageRouter(dependencies.localStorage, dependencies.documents),
+    );
   }
 
   const authenticated = Router();
@@ -262,6 +271,11 @@ export function createApp(dependencies: AppDependencies): Express {
           config.UPLOAD_RATE_LIMIT_MAX,
           'Demasiadas subidas; espera un momento',
         ),
+        downloadUrlLimit: userLimit(
+          'document-download-url',
+          config.UPLOAD_RATE_LIMIT_MAX,
+          'Demasiadas solicitudes de descarga; espera un momento',
+        ),
       }),
     );
   }
@@ -289,8 +303,16 @@ export function createApp(dependencies: AppDependencies): Express {
         config.STATISTICS_EXPORT_MAX_ROWS,
       ),
     );
-  if (dependencies.notifications)
+  if (dependencies.notifications) {
+    const pushSubscriptionLimit = userLimit(
+      'push-subscriptions',
+      config.PUSH_SUBSCRIPTION_RATE_LIMIT_MAX,
+      'Demasiadas suscripciones push; espera un momento',
+    );
+    authenticated.post('/notifications/push-subscriptions', pushSubscriptionLimit);
+    authenticated.delete('/notifications/push-subscriptions', pushSubscriptionLimit);
     authenticated.use('/notifications', createNotificationsRouter(dependencies.notifications));
+  }
   if (dependencies.achievements)
     authenticated.use('/achievements', createAchievementsRouter(dependencies.achievements));
   v1.use(authenticated);

@@ -371,10 +371,19 @@ export class PrivacyRepository {
             transferredGroups += 1;
             continue;
           }
-          const activity =
-            (await tx.event.count({ where: { groupId } })) +
-            (await tx.expense.count({ where: { groupId } })) +
-            (await tx.settlement.count({ where: { groupId } }));
+          const [invitations, events, expenses, settlements, funds, budgets, recurring, documents] =
+            await Promise.all([
+              tx.groupInvitation.count({ where: { groupId } }),
+              tx.event.count({ where: { groupId } }),
+              tx.expense.count({ where: { groupId } }),
+              tx.settlement.count({ where: { groupId } }),
+              tx.fund.count({ where: { groupId } }),
+              tx.budget.count({ where: { groupId } }),
+              tx.recurringExpense.count({ where: { groupId } }),
+              tx.document.count({ where: { groupId } }),
+            ]);
+          // No se borra un grupo que aún contiene datos de otros módulos o documentos compartidos.
+          const activity = invitations + events + expenses + settlements + funds + budgets + recurring + documents;
           if (activity === 0) {
             await tx.group.delete({ where: { id: groupId } });
             deletedGroups += 1;

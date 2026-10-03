@@ -45,15 +45,25 @@ export class DocumentsService {
   async accessLevel(userId: string, document: Pick<DocumentRow, 'id' | 'ownerId' | 'groupId'>) {
     let level = 0;
     if (document.ownerId === userId) level = RANK.MANAGE;
-    const grant = await this.repository.grantFor(document.id, userId);
-    if (grant) level = Math.max(level, RANK[grant.access]);
-    if (document.groupId && level < RANK.MANAGE) {
-      const membership = await this.groups
-        .requireRole(userId, document.groupId, [GroupRole.OWNER, GroupRole.ADMIN, GroupRole.MEMBER])
-        .catch(() => null);
-      if (membership) {
-        level = Math.max(level, membership.role === GroupRole.MEMBER ? RANK.VIEW : RANK.MANAGE);
+    let membership: Awaited<ReturnType<GroupsService['requireRole']>> | null = null;
+    if (document.groupId) {
+      try {
+        membership = await this.groups.requireRole(userId, document.groupId, [
+          GroupRole.OWNER,
+          GroupRole.ADMIN,
+          GroupRole.MEMBER,
+        ]);
+      } catch (error) {
+        if (!(error instanceof AppError) || error.code !== 'GROUP_NOT_FOUND') throw error;
       }
+    }
+    // Las concesiones de un documento de grupo dejan de ser válidas al salir del grupo.
+    if (membership || !document.groupId) {
+      const grant = await this.repository.grantFor(document.id, userId);
+      if (grant) level = Math.max(level, RANK[grant.access]);
+    }
+    if (membership && level < RANK.MANAGE) {
+      level = Math.max(level, membership.role === GroupRole.MEMBER ? RANK.VIEW : RANK.MANAGE);
     }
     return (Object.keys(RANK) as DocumentAccessLevel[]).find((key) => RANK[key] === level) ?? null;
   }
@@ -75,7 +85,13 @@ export class DocumentsService {
   }
 
   private present(document: DocumentRow, access: DocumentAccessLevel) {
-    const { ownerId: _ownerId, ...rest } = document;
+    const {
+      ownerId: _ownerId,
+      storageKey: _storageKey,
+      ...rest
+    } = document as DocumentRow & {
+      storageKey?: string;
+    };
     return { ...rest, access };
   }
 
@@ -271,13 +287,16 @@ export class DocumentsService {
       'GRANT_OWNER',
       'El propietario ya tiene control total',
     );
-    const membership = await this.groups
-      .requireRole(granteeId, document.groupId, [
+    let membership: Awaited<ReturnType<GroupsService['requireRole']>> | null = null;
+    try {
+      membership = await this.groups.requireRole(granteeId, document.groupId, [
         GroupRole.OWNER,
         GroupRole.ADMIN,
         GroupRole.MEMBER,
-      ])
-      .catch(() => null);
+      ]);
+    } catch (error) {
+      if (!(error instanceof AppError) || error.code !== 'GROUP_NOT_FOUND') throw error;
+    }
     ensure(
       membership,
       422,
