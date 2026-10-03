@@ -8,6 +8,7 @@ datasource db {
 
 enum AccountProvider {
   PASSWORD
+  GOOGLE
 }
 
 enum GroupRole {
@@ -145,6 +146,7 @@ model User {
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   accounts                Account[]
+  oauthStates             OAuthState[]
   sessions                Session[]
   groupMemberships        GroupMember[]
   sentInvitations         GroupInvitation[]        @relation("InvitationSender")
@@ -186,6 +188,22 @@ model Account {
 
   @@unique([provider, providerAccountId])
   @@index([userId])
+}
+
+/// Transacción OIDC de un solo uso; state y nonce solo se persisten como hashes.
+model OAuthState {
+  id           String    @id @default(uuid()) @db.Uuid
+  stateHash    String    @unique @db.Char(64)
+  nonceHash    String    @db.Char(64)
+  intent       String    @db.VarChar(16)
+  userId       String?   @db.Uuid
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime  @default(now())
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId, expiresAt])
 }
 
 /// Sesión opaca revocable; solo persiste hashes de token y CSRF.

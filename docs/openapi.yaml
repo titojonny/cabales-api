@@ -92,6 +92,83 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/config:
+    get:
+      tags: [Auth]
+      summary: Indica los proveedores de acceso habilitados para la interfaz pública
+      operationId: getAuthConfig
+      security: []
+      responses:
+        '200':
+          description: Configuración pública de autenticación
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthConfig' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/google/start:
+    get:
+      tags: [Auth]
+      summary: Inicia el flujo OIDC de Google con state, nonce y PKCE
+      operationId: startGoogleLogin
+      security: []
+      responses:
+        '302': { description: Redireccion a Google }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Valida el callback OIDC y emite la misma sesión opaca que login
+      operationId: googleCallback
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 4096 }
+        - name: error
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100 }
+        - name: error_description
+          in: query
+          required: false
+          schema: { type: string, maxLength: 512 }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{32,256}$' }
+      responses:
+        '302': { description: Redireccion a la aplicación }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/google/link/start:
+    post:
+      tags: [Auth]
+      summary: Prepara la vinculación autenticada de Google
+      operationId: startGoogleLink
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      responses:
+        '200':
+          description: URL de autorización de un solo uso
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/GoogleLinkStart' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/auth/logout:
     post:
       tags: [Auth]
@@ -116,7 +193,7 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
     patch:
       tags: [Auth]
-      summary: 'Rectifica nombre visible o idioma del titular'
+      summary: 'Actualiza el perfil del titular'
       operationId: updateMe
       security:
         - sessionCookie: []
@@ -129,13 +206,45 @@ paths:
             schema: { $ref: '#/components/schemas/ProfilePatch' }
       responses:
         '200':
-          description: 'Operación correcta'
+          description: 'Operacion correcta'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/UserEnvelope' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/methods:
+    get:
+      tags: [Auth]
+      summary: Lista los métodos de acceso propios sin exponer secretos
+      operationId: listAuthMethods
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Métodos de acceso
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthMethods' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/auth/google:
+    delete:
+      tags: [Auth]
+      summary: Desvincula Google sin dejar al usuario sin otro acceso
+      operationId: unlinkGoogle
+      security: [{ sessionCookie: [], csrfCookie: [], csrfHeader: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/MutationSuccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/groups:
     get:
@@ -2850,6 +2959,12 @@ components:
         content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
       }
   schemas:
+    SuccessEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data: {}
     ErrorEnvelope:
       type: object
       additionalProperties: false
@@ -2901,6 +3016,28 @@ components:
           additionalProperties: false
           required: [user, csrfToken]
           properties: { user: { $ref: '#/components/schemas/User' }, csrfToken: { type: string } }
+    AuthConfig:
+      type: object
+      additionalProperties: false
+      required: [googleEnabled]
+      properties:
+        googleEnabled: { type: boolean }
+    GoogleLinkStart:
+      type: object
+      additionalProperties: false
+      required: [authorizationUrl]
+      properties:
+        authorizationUrl: { type: string, format: uri }
+    AuthMethods:
+      type: object
+      additionalProperties: false
+      required: [providers, hasPassword]
+      properties:
+        providers:
+          type: array
+          maxItems: 4
+          items: { enum: [PASSWORD, GOOGLE] }
+        hasPassword: { type: boolean }
     RegisterInput:
       type: object
       additionalProperties: false

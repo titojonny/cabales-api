@@ -3,6 +3,7 @@ allowBuilds:
   argon2: true
   esbuild: true
   prisma: true
+  tesseract.js: set this to true or false
 
 overrides:
   deepmerge-ts: ^8.0.2

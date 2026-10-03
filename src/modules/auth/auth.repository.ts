@@ -1,5 +1,9 @@
 import { AccountProvider, Prisma } from '@prisma/client';
 import type { Database } from '../../database/client.js';
+import type { GoogleIdentity } from '../../infrastructure/google-oauth.js';
+
+// Se mantiene como literal para que el servidor no dependa de un cliente Prisma generado antes de P9.
+const GOOGLE_PROVIDER = 'GOOGLE' as AccountProvider;
 
 const userSelect = {
   id: true,
@@ -194,6 +198,164 @@ export class AuthRepository {
       select: { passwordHash: true },
     });
     return account?.passwordHash ?? null;
+  }
+
+  async createOAuthState(input: {
+    stateHash: string;
+    nonceHash: string;
+    intent: 'login' | 'link';
+    userId?: string;
+    expiresAt: Date;
+  }) {
+    return this.db.oAuthState.create({
+      data: {
+        stateHash: input.stateHash,
+        nonceHash: input.nonceHash,
+        intent: input.intent,
+        expiresAt: input.expiresAt,
+        ...(input.userId ? { userId: input.userId } : {}),
+      },
+    });
+  }
+
+  /** Reclama state una sola vez y evita reutilizar callbacks o transacciones caducadas. */
+  async consumeOAuthState(stateHash: string) {
+    return this.db.$transaction(async (tx) => {
+      const row = await tx.oAuthState.findUnique({
+        where: { stateHash },
+        select: {
+          id: true,
+          nonceHash: true,
+          intent: true,
+          userId: true,
+          expiresAt: true,
+          usedAt: true,
+        },
+      });
+      if (!row || row.usedAt || row.expiresAt.getTime() <= Date.now()) return null;
+      const claimed = await tx.oAuthState.updateMany({
+        where: { id: row.id, usedAt: null, expiresAt: { gt: new Date() } },
+        data: { usedAt: new Date() },
+      });
+      return claimed.count === 1 ? row : null;
+    });
+  }
+
+  /** Resuelve login o vinculación en una transacción, siempre desde una identidad Google verificada. */
+  async linkOrCreateGoogle(identity: GoogleIdentity, linkUserId?: string) {
+    return this.db.$transaction(async (tx) => {
+      if (identity.emailVerified !== true) return { status: 'unverified' as const };
+      const existingGoogle = await tx.account.findUnique({
+        where: {
+          provider_providerAccountId: {
+            provider: GOOGLE_PROVIDER,
+            providerAccountId: identity.subject,
+          },
+        },
+        select: { userId: true },
+      });
+
+      if (linkUserId) {
+        const target = await tx.user.findUnique({
+          where: { id: linkUserId },
+          select: { ...userSelect, isActive: true },
+        });
+        if (!target || !target.isActive) return { status: 'inactive' as const };
+        if (existingGoogle && existingGoogle.userId !== target.id)
+          return { status: 'conflict' as const };
+        if (!existingGoogle) {
+          await tx.account.create({
+            data: {
+              userId: target.id,
+              provider: GOOGLE_PROVIDER,
+              providerAccountId: identity.subject,
+            },
+          });
+        }
+        const user =
+          target.email === identity.email && !target.emailVerifiedAt
+            ? await tx.user.update({
+                where: { id: target.id },
+                data: { emailVerifiedAt: new Date() },
+                select: userSelect,
+              })
+            : target;
+        return { status: 'linked' as const, user: toPublicUser(user) };
+      }
+
+      let user = existingGoogle
+        ? await tx.user.findUnique({
+            where: { id: existingGoogle.userId },
+            select: { ...userSelect, isActive: true },
+          })
+        : await tx.user.findUnique({
+            where: { email: identity.email },
+            select: { ...userSelect, isActive: true },
+          });
+      if (user && !user.isActive) return { status: 'inactive' as const };
+
+      if (!user) {
+        user = await tx.user.create({
+          data: {
+            email: identity.email,
+            displayName: (identity.displayName ?? identity.email.split('@')[0]!).slice(0, 120),
+            ...(identity.avatarUrl ? { avatarUrl: identity.avatarUrl } : {}),
+            emailVerifiedAt: new Date(),
+            accounts: {
+              create: {
+                provider: GOOGLE_PROVIDER,
+                providerAccountId: identity.subject,
+              },
+            },
+          },
+          select: { ...userSelect, isActive: true },
+        });
+      } else {
+        if (!existingGoogle) {
+          await tx.account.create({
+            data: {
+              userId: user.id,
+              provider: GOOGLE_PROVIDER,
+              providerAccountId: identity.subject,
+            },
+          });
+        }
+        if (!user.emailVerifiedAt) {
+          user = await tx.user.update({
+            where: { id: user.id },
+            data: { emailVerifiedAt: new Date() },
+            select: { ...userSelect, isActive: true },
+          });
+        }
+      }
+      return { status: 'authenticated' as const, user: toPublicUser(user) };
+    });
+  }
+
+  async authMethods(userId: string) {
+    const accounts = await this.db.account.findMany({
+      where: { userId },
+      select: { provider: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return {
+      providers: accounts.map((account) => String(account.provider) as 'PASSWORD' | 'GOOGLE'),
+      hasPassword: accounts.some((account) => account.provider === AccountProvider.PASSWORD),
+    };
+  }
+
+  async unlinkGoogle(userId: string) {
+    return this.db.$transaction(async (tx) => {
+      const google = await tx.account.findFirst({
+        where: { userId, provider: GOOGLE_PROVIDER },
+        select: { id: true },
+      });
+      if (!google) return 'missing' as const;
+      const count = await tx.account.count({ where: { userId } });
+      if (count <= 1) return 'last' as const;
+      await tx.account.delete({ where: { id: google.id } });
+      return 'removed' as const;
+    });
   }
 
   async createSession(input: {

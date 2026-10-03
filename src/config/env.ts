@@ -45,6 +45,10 @@ const envSchema = z.object({
     .string()
     .regex(/^[A-Za-z0-9_-]+$/)
     .default('cabales_session'),
+  // Google OIDC queda apagado si no se declaran las tres piezas del cliente.
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_CLIENT_SECRET: optionalSecret,
+  GOOGLE_REDIRECT_URI: optionalUrl,
   // Límites de tasa: memoria solo para desarrollo/pruebas; producción exige Redis compartido.
   RATE_LIMIT_STORE: z.enum(['memory', 'redis']).default('memory'),
   REDIS_URL: optionalUrl,
@@ -164,6 +168,9 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
       privacyRequestsMs: env.RETENTION_PRIVACY_REQUEST_DAYS * DAY_MS,
     },
     isProduction,
+    googleEnabled: Boolean(
+      env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REDIRECT_URI,
+    ),
   };
 
   if (
@@ -175,6 +182,13 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
     fail('CORS_ORIGINS de produccion no puede incluir localhost');
   }
   if (config.corsOrigins.includes('*')) fail('CORS_ORIGINS no admite * con cookies');
+  const googleValues = [env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.GOOGLE_REDIRECT_URI];
+  if (googleValues.some(Boolean) && !googleValues.every(Boolean)) {
+    fail('GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET y GOOGLE_REDIRECT_URI deben declararse juntos');
+  }
+  if (config.googleEnabled && isProduction && !env.GOOGLE_REDIRECT_URI!.startsWith('https://')) {
+    fail('GOOGLE_REDIRECT_URI de produccion debe usar HTTPS');
+  }
   if (env.RATE_LIMIT_STORE === 'redis' && !env.REDIS_URL)
     fail('REDIS_URL es obligatorio con redis');
   if (isProduction && env.RATE_LIMIT_STORE !== 'redis') {

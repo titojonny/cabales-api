@@ -35,6 +35,7 @@ import {
   S3FileStorageProvider,
   type FileStorageProvider,
 } from './infrastructure/storage.js';
+import { GoogleOAuthClient } from './infrastructure/google-oauth.js';
 import { AchievementsService } from './modules/achievements/achievements.service.js';
 import { AuthRepository } from './modules/auth/auth.repository.js';
 import { AuthService } from './modules/auth/auth.service.js';
@@ -154,10 +155,19 @@ export function createContainer(
       sessionTtlMs: config.sessionTtlMs,
       emailVerificationTtlMs: config.emailVerificationTtlMs,
       passwordResetTtlMs: config.passwordResetTtlMs,
+      googleStateTtlMs: 10 * 60 * 1000,
       appOrigin: config.APP_ORIGIN,
     },
     email,
     background,
+    config.googleEnabled
+      ? new GoogleOAuthClient({
+          clientId: config.GOOGLE_CLIENT_ID!,
+          clientSecret: config.GOOGLE_CLIENT_SECRET!,
+          redirectUri: config.GOOGLE_REDIRECT_URI!,
+          timeoutMs: config.EXTERNAL_TIMEOUT_MS,
+        })
+      : undefined,
   );
   const eventsRepository = new EventsRepository(db);
   const events = new EventsService(eventsRepository, groups, domainEvents);
