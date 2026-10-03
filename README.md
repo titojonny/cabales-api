@@ -23,6 +23,8 @@ Cada miembro participante responde únicamente por sí mismo en `PUT .../rsvp` c
 
 API REST de Cabales para registrar grupos y eventos, dividir gastos manuales en centavos, producir liquidaciones verificables y operar fondos, presupuestos, documentos, OCR asistido, Cabudas, estadísticas, avisos, logros y derechos de privacidad. Es un monolito modular en Express, TypeScript, Prisma 7 y PostgreSQL.
 
+Las suites de integración que usan `TEST_DATABASE_URL` se ejecutan sin paralelismo entre archivos: cada suite limpia la misma base antes de preparar sus datos y el orden paralelo produciría sesiones inválidas y resultados cruzados.
+
 ## P2: reparto porcentual e importes adicionales
 
 Los gastos admiten `EQUAL`, `EXACT` y `PERCENT`. En `PERCENT`, cada participante envía `percentageBps` y la suma debe ser exactamente `10000`; el servicio calcula el subtotal con restos mayores. `subtotalCents` es la base y `totalCents` debe ser exactamente `subtotalCents + taxCents + tipCents`. Impuesto y propina aceptan importe (`taxCents`/`tipCents`) o porcentaje (`taxPercentBps`/`tipPercentBps`) sobre el subtotal, no ambos. Los porcentajes se redondean al centavo más cercano con mitad hacia arriba (`floor((subtotalCents * bps + 5000) / 10000)`). Cada cargo se reparte proporcionalmente al subtotal de las personas, también cuando ese subtotal proviene de ítems, usando restos mayores.
@@ -142,7 +144,7 @@ pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema
 - `COOKIE_NAME`: nombre de la cookie HttpOnly.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI`: cliente OIDC opcional; deben existir juntos para habilitar Google. El redirect local es `http://localhost:3000/api/v1/auth/google/callback` y en produccion debe ser el URI HTTPS exacto registrado en Google Cloud.
 - `RATE_LIMIT_STORE` (`memory`|`redis`) y `REDIS_URL`: store de límites; producción exige Redis compartido y el arranque falla sin él. Si Redis cae, los límites sensibles fallan cerrados (503) y el global deja pasar.
-- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `EXPENSE_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario) y `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario).
+- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `EXPENSE_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario), `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario) e `INCOME_RATE_LIMIT_MAX` (operaciones de ingresos personales por usuario).
 - `SCHEDULER_ENABLED`, `SCHEDULER_INTERVAL_SECONDS`, `SCHEDULER_LOCK_TTL_SECONDS` y `SCHEDULER_MAX_ATTEMPTS`: habilitación, frecuencia, TTL del lock y reintentos acotados del planificador. En producción no se debe desactivar el job de recordatorios.
 - `APP_ORIGIN` y `PUBLIC_API_ORIGIN`: bases de enlaces de correo y de URLs firmadas.
 - `EMAIL_VERIFICATION_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`, `INVITATION_TTL_DAYS`: vigencia de enlaces de un solo uso.
@@ -207,7 +209,7 @@ Endpoints autenticados:
 - Presupuestos: `/api/v1/groups/:groupId/budgets` (progreso del periodo, historial y alertas).
 - Documentos: `/api/v1/documents` (subida binaria validada por firma, permisos, URL firmada, bitácora).
 - OCR: `/api/v1/ocr/jobs` (asíncrono; solo propone y exige confirmación humana).
-- Cabudas: `/api/v1/cabudas/{summary,history}`; Estadísticas: `/api/v1/statistics/summary` y `/api/v1/statistics/summary/export` (CSV acotado, moneda explícita, escape de fórmulas y rate limit).
+- Cabudas: `/api/v1/cabudas/{summary,history}`; Estadísticas: `/api/v1/statistics/summary`, `/api/v1/statistics/summary/export` (CSV) y `/api/v1/statistics/summary/export/pdf` (informe PDF generado en servidor); Ingresos personales: `/api/v1/incomes`.
 - Avisos: `/api/v1/notifications` (lista, contador, lectura, archivo, preferencias, `push-config` y suscripciones push).
 - Logros: `/api/v1/achievements` y `/history`.
 - Privacidad: `/api/v1/privacy/requests` (ARCO-POL, confirmación, cancelación, exportación JSON).
@@ -318,3 +320,10 @@ La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contr
 ## Principios aplicados
 
 Se aplican SRP y separación de validación, negocio y persistencia; zero trust en body, parámetros, cookies y cabeceras; mínimo privilegio RBAC; atomicidad y aislamiento serializable; request/correlation ID; fallos seguros y mensajes controlados; health/readiness separados; logs sin secretos; y algoritmos puros, deterministas y verificables para dinero y liquidación.
+# P7: estadísticas avanzadas, ingresos y proyección
+
+El resumen autenticado de `/api/v1/statistics/summary` calcula la variación absoluta y porcentual frente al periodo anterior equivalente, el desglose por categoría, las estadísticas de fondos visibles, el resumen de ingresos contra gastos y una proyección del mes actual. La proyección es explícitamente una estimación: divide el gasto real acumulado del mes entre los días transcurridos, lo extiende a los días restantes y suma una sola vez los `RecurringExpense` activos cuyo `nextRunAt` cae entre ahora y el inicio del próximo mes. No interpreta `frequency`, no ejecuta recurrentes y tolera el modelo existente sin cambios.
+
+Los ingresos son personales y no pertenecen a grupos ni documentos. Se almacenan en `Income` con importe, fecha, categoría, nota y moneda, y todas las consultas filtran por el usuario autenticado. El informe CSV existente se mantiene; `/api/v1/statistics/summary/export/pdf` genera un PDF de texto en el servidor sin navegador.
+
+La migración `20261004030000_p7_ingresos` es aditiva. La variable `INCOME_RATE_LIMIT_MAX` controla el límite por usuario de las operaciones de ingresos y tiene valor `60` por defecto.

@@ -54,6 +54,8 @@ import { FundsService } from './modules/funds/funds.service.js';
 import { GroupsRepository } from './modules/groups/groups.repository.js';
 import { GroupsService } from './modules/groups/groups.service.js';
 import { NotificationsService } from './modules/notifications/notifications.service.js';
+import { IncomesRepository } from './modules/incomes/incomes.repository.js';
+import { IncomesService } from './modules/incomes/incomes.service.js';
 import { OcrRepository } from './modules/ocr/ocr.repository.js';
 import { OcrService } from './modules/ocr/ocr.service.js';
 import { PrivacyRepository } from './modules/privacy/privacy.repository.js';
@@ -229,6 +231,7 @@ export function createContainer(
     budgets,
     cabudas: new CabudasService(db),
     statistics: new StatisticsService(db, budgets, budgetsRepository),
+    incomes: new IncomesService(new IncomesRepository(db)),
     notifications,
     achievements,
     readiness: async () => {

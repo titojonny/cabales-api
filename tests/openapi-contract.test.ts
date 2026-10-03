@@ -16,6 +16,7 @@ const MOUNTS: Record<string, string> = {
   ocr: '/ocr',
   cabudas: '/cabudas',
   statistics: '/statistics',
+  incomes: '/incomes',
   notifications: '/notifications',
   achievements: '/achievements',
 };
