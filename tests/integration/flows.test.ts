@@ -15,10 +15,14 @@ const fakeOcr: OcrProvider = {
     return {
       merchant: 'Pupusería',
       totalCents: 9000,
+      subtotalCents: null,
+      taxCents: null,
+      tipCents: null,
       currency: 'USD',
       occurredAt: null,
       items: [],
       confidence: 0.9,
+      confidenceByField: null,
     };
   },
 };
@@ -212,6 +216,104 @@ describe.skipIf(!TEST_DATABASE_URL)('Integración PostgreSQL: flujo completo de 
     ).toBe(true);
   });
 
+  it('crea un gasto desde OCR, protege propiedad, confirmacion y grupo documental', async () => {
+    const upload = await ana.agent
+      .post(`/api/v1/documents?name=ocr.png&groupId=${state.groupId}`)
+      .set('X-CSRF-Token', ana.csrf)
+      .set('Content-Type', 'image/png')
+      .send(PNG_BYTES);
+    expect(upload.status).toBe(201);
+    const jobResponse = await ana.post('/ocr/jobs', { documentId: upload.body.data.id });
+    expect(jobResponse.status).toBe(202);
+    await drain();
+    const job = await ana.get(`/ocr/jobs/${jobResponse.body.data.id}`);
+    expect(job.body.data.status).toBe('SUCCEEDED');
+
+    const expense = await ana.post(
+      `/groups/${state.groupId}/expenses`,
+      {
+        ocrJobId: job.body.data.id,
+        eventId: state.eventId,
+        title: 'OCR corregido',
+        totalCents: 900,
+        currency: 'USD',
+        splitMode: 'EXACT',
+        occurredAt: new Date().toISOString(),
+        participants: [{ eventParticipantId: state.pAna, shareCents: 900 }],
+        payers: [{ eventParticipantId: state.pAna, amountCents: 900 }],
+      },
+      { 'Idempotency-Key': 'ocr-expense-key-0001' },
+    );
+    expect(expense.status).toBe(201);
+    const storedJob = await ctx.db.ocrJob.findUnique({ where: { id: job.body.data.id } });
+    expect(storedJob).toMatchObject({
+      status: 'SUCCEEDED',
+      confirmedExpenseId: expense.body.data.id,
+    });
+    expect(
+      (await ctx.db.document.findUnique({ where: { id: upload.body.data.id } }))?.expenseId,
+    ).toBe(expense.body.data.id);
+
+    const foreignJob = await bob.post(
+      `/groups/${state.groupId}/expenses`,
+      {
+        ocrJobId: job.body.data.id,
+        eventId: state.eventId,
+        title: 'No debe entrar',
+        totalCents: 900,
+        currency: 'USD',
+        splitMode: 'EXACT',
+        occurredAt: new Date().toISOString(),
+        participants: [{ eventParticipantId: state.pAna, shareCents: 900 }],
+        payers: [{ eventParticipantId: state.pAna, amountCents: 900 }],
+      },
+      { 'Idempotency-Key': 'ocr-foreign-key-0001' },
+    );
+    expect(foreignJob.body.error.code).toBe('OCR_JOB_NOT_FOUND');
+
+    const confirmedAgain = await ana.post(
+      `/groups/${state.groupId}/expenses`,
+      {
+        ocrJobId: job.body.data.id,
+        eventId: state.eventId,
+        title: 'Repetido',
+        totalCents: 900,
+        currency: 'USD',
+        splitMode: 'EXACT',
+        occurredAt: new Date().toISOString(),
+        participants: [{ eventParticipantId: state.pAna, shareCents: 900 }],
+        payers: [{ eventParticipantId: state.pAna, amountCents: 900 }],
+      },
+      { 'Idempotency-Key': 'ocr-repeated-key-0001' },
+    );
+    expect(confirmedAgain.body.error.code).toBe('OCR_ALREADY_CONFIRMED');
+
+    const otherGroup = await ana.post('/groups', { name: 'Otro grupo OCR', currency: 'USD' });
+    const otherUpload = await ana.agent
+      .post(`/api/v1/documents?name=otro.png&groupId=${otherGroup.body.data.id}`)
+      .set('X-CSRF-Token', ana.csrf)
+      .set('Content-Type', 'image/png')
+      .send(PNG_BYTES);
+    const otherJob = await ana.post('/ocr/jobs', { documentId: otherUpload.body.data.id });
+    await drain();
+    const wrongGroup = await ana.post(
+      `/groups/${state.groupId}/expenses`,
+      {
+        ocrJobId: otherJob.body.data.id,
+        eventId: state.eventId,
+        title: 'Grupo incorrecto',
+        totalCents: 900,
+        currency: 'USD',
+        splitMode: 'EXACT',
+        occurredAt: new Date().toISOString(),
+        participants: [{ eventParticipantId: state.pAna, shareCents: 900 }],
+        payers: [{ eventParticipantId: state.pAna, amountCents: 900 }],
+      },
+      { 'Idempotency-Key': 'ocr-wrong-group-key-0001' },
+    );
+    expect(wrongGroup.body.error.code).toBe('OCR_DOCUMENT_GROUP_MISMATCH');
+  });
+
   it('Cabudas estima eventos abiertos y consolida deudas liquidadas', async () => {
     const before = await bob.get('/cabudas/summary');
     expect(before.body.data.openEvents).toEqual([
@@ -256,21 +358,88 @@ describe.skipIf(!TEST_DATABASE_URL)('Integración PostgreSQL: flujo completo de 
   });
 
   it('Estadísticas agregan solo datos autorizados', async () => {
-    const stats = await ana.get('/statistics/summary');
+    const statsGroup = await ana.post('/groups', {
+      name: 'Estadísticas aisladas',
+      currency: 'USD',
+    });
+    expect(statsGroup.status).toBe(201);
+    const statsGroupId = statsGroup.body.data.id as string;
+    const statsCategory = await ana.post(`/groups/${statsGroupId}/categories`, {
+      name: 'Comida',
+      color: '#ff8800',
+    });
+    expect(statsCategory.status).toBe(201);
+    const statsEvent = await ana.post(`/groups/${statsGroupId}/events`, {
+      name: 'Cena aislada',
+      startsAt: new Date().toISOString(),
+      memberIds: [],
+      guests: [],
+    });
+    expect(statsEvent.status).toBe(201);
+    const statsDetail = await ana.get(`/groups/${statsGroupId}`);
+    const statsAnaMember = statsDetail.body.data.members.find(
+      (member: { user: { displayName: string } }) => member.user.displayName === 'Ana',
+    ).id as string;
+    const statsParticipant = (
+      statsEvent.body.data.participants as Array<{ id: string; groupMemberId: string | null }>
+    ).find((participant) => participant.groupMemberId === statsAnaMember)!.id as string;
+    const statsBudget = await ana.post(`/groups/${statsGroupId}/budgets`, {
+      name: 'Presupuesto aislado',
+      amountCents: 10_000,
+      period: 'MONTHLY',
+      startsAt: '2026-01-01T00:00:00.000Z',
+      categoryId: statsCategory.body.data.id,
+      alertThresholdPercent: 50,
+    });
+    expect(statsBudget.status).toBe(201);
+    const occurredAt = new Date().toISOString();
+    const firstExpense = await ana.post(
+      `/groups/${statsGroupId}/expenses`,
+      {
+        eventId: statsEvent.body.data.id,
+        title: 'Comida categorizada',
+        totalCents: 9000,
+        currency: 'USD',
+        splitMode: 'EXACT',
+        categoryId: statsCategory.body.data.id,
+        occurredAt,
+        participants: [{ eventParticipantId: statsParticipant, shareCents: 9000 }],
+        payers: [{ eventParticipantId: statsParticipant, amountCents: 9000 }],
+      },
+      { 'Idempotency-Key': 'statistics-isolated-expense-0001' },
+    );
+    expect(firstExpense.status).toBe(201);
+    const secondExpense = await ana.post(
+      `/groups/${statsGroupId}/expenses`,
+      {
+        eventId: statsEvent.body.data.id,
+        title: 'Comida sin categorizar',
+        totalCents: 900,
+        currency: 'USD',
+        splitMode: 'EXACT',
+        occurredAt,
+        participants: [{ eventParticipantId: statsParticipant, shareCents: 900 }],
+        payers: [{ eventParticipantId: statsParticipant, amountCents: 900 }],
+      },
+      { 'Idempotency-Key': 'statistics-isolated-expense-0002' },
+    );
+    expect(secondExpense.status).toBe(201);
+    const stats = await ana.get(`/statistics/summary?groupId=${statsGroupId}`);
     expect(stats.body.data.totals).toMatchObject({
-      spentCents: 9000,
-      expenseCount: 1,
-      myShareCents: 3000,
-      myPaidCents: 9000,
+      spentCents: 9900,
+      expenseCount: 2,
+      // Los dos gastos de este flujo solo incluyen a Ana como participante;
+      // myShareCents suma sus partes, mientras myPaidCents suma sus pagos.
+      // No se mezclan los 9,900 centavos pagados con una parte de terceros.
+      myShareCents: 9900,
+      myPaidCents: 9900,
     });
     expect(stats.body.data.byCategory[0]).toMatchObject({ name: 'Comida', totalCents: 9000 });
     expect(stats.body.data.budgets[0]).toMatchObject({
-      budgetId: state.budgetId,
+      budgetId: statsBudget.body.data.id,
       spentCents: 9000,
     });
-    const csv = await ana.get(
-      `/statistics/summary/export?groupId=${state.groupId}&currency=USD`,
-    );
+    const csv = await ana.get(`/statistics/summary/export?groupId=${statsGroupId}&currency=USD`);
     expect(csv.status).toBe(200);
     expect(csv.headers['content-disposition']).toContain('attachment');
     expect(csv.headers['content-type']).toContain('text/csv');
@@ -278,7 +447,7 @@ describe.skipIf(!TEST_DATABASE_URL)('Integración PostgreSQL: flujo completo de 
     expect(csv.text).toContain('amountCents');
     const carlStats = await carl.get('/statistics/summary');
     expect(carlStats.body.data.totals.spentCents).toBe(0);
-    expect((await carl.get(`/statistics/summary?groupId=${state.groupId}`)).status).toBe(404);
+    expect((await carl.get(`/statistics/summary?groupId=${statsGroupId}`)).status).toBe(404);
   });
 
   it('Fondos: saldo derivado, permisos, idempotencia y sin saldo negativo', async () => {

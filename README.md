@@ -113,12 +113,12 @@ pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema
 - `SESSION_TTL_HOURS`: vigencia de la sesión, por defecto 168 horas.
 - `COOKIE_NAME`: nombre de la cookie HttpOnly.
 - `RATE_LIMIT_STORE` (`memory`|`redis`) y `REDIS_URL`: store de límites; producción exige Redis compartido y el arranque falla sin él. Si Redis cae, los límites sensibles fallan cerrados (503) y el global deja pasar.
-- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario) y `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario).
+- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `EXPENSE_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario) y `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario).
 - `APP_ORIGIN` y `PUBLIC_API_ORIGIN`: bases de enlaces de correo y de URLs firmadas.
 - `EMAIL_VERIFICATION_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`, `INVITATION_TTL_DAYS`: vigencia de enlaces de un solo uso.
 - `EMAIL_PROVIDER` (`logging`|`http`), `EMAIL_FROM`, `EMAIL_HTTP_URL`, `EMAIL_HTTP_API_KEY`: correo transaccional; `logging` no envía ni registra contenido.
 - `STORAGE_PROVIDER` (`local`|`s3`), `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET` (≥32 caracteres en producción local), `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `SIGNED_URL_TTL_SECONDS`, `MAX_UPLOAD_BYTES`. S3 funciona con MinIO y nunca devuelve URLs permanentes.
-- `OCR_PROVIDER` (`disabled`|`local`|`http`), `OCR_HTTP_URL`, `OCR_HTTP_API_KEY`, `OCR_MAX_ATTEMPTS`; `local` es determinista y solo para desarrollo/pruebas, y falla en producción. `PUSH_PROVIDER` (`disabled`|`webpush`), `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`; la privada solo existe en el entorno del servidor.
+- `OCR_PROVIDER` (`disabled`|`local`|`http`|`tesseract`), `OCR_HTTP_URL`, `OCR_HTTP_API_KEY`, `OCR_TESSERACT_LANGS` (por defecto `spa+eng`), `OCR_TESSERACT_LANG_PATH` y `OCR_MAX_ATTEMPTS`; `tesseract` es OCR real local para imágenes y rechaza PDF, mientras `local` es determinista solo para desarrollo/pruebas y falla en producción. `PUSH_PROVIDER` (`disabled`|`webpush`), `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`; la privada solo existe en el entorno del servidor.
 - `STATISTICS_EXPORT_MAX_ROWS` y `STATISTICS_EXPORT_RATE_LIMIT_MAX`: límite de filas y solicitudes de la exportación CSV.
 - `PRIVACY_EXPORT_TTL_DAYS` y `RETENTION_*_DAYS`: plazos provisionales de exportación y retención; deben confirmarse legalmente.
 - `TRUST_PROXY`: número exacto de proxies confiables delante de Express; `0` por defecto.
@@ -221,6 +221,26 @@ Prisma no genera restricciones `CHECK`. Los servicios MVP verifican positividad,
 El schema incluye `User`, `Account`, `Session`, `Group`, `GroupMember`, `GroupInvitation`, `Event`, `EventParticipant`, `EventLink`, `Expense`, `ExpenseParticipant`, `ExpensePayer`, `ExpenseItem`, `ExpenseItemAllocation`, `Receipt`, `OcrJob`, `Settlement`, `SettlementTransfer`, `TransferStatusHistory`, `Fund`, `FundMember`, `FundMovement`, `Category`, `Tag`, `ExpenseTag`, `Budget`, `RecurringExpense`, `Document`, `DocumentAccessGrant`, `DocumentAccessLog`, `PushSubscription`, `Notification`, `Achievement`, `UserAchievement`, `IdempotencyKey` y `AuditLog`.
 
 Balances, saldos de fondos, consumo de presupuestos y estadísticas no se almacenan: se derivan de movimientos y gastos.
+
+## Decisiones P1: OCR y items
+
+Los errores de proveedor se exponen con el sobre uniforme `{ success: false, error }`; un proveedor no disponible responde `503 PROVIDER_UNAVAILABLE`, distinto de un fallo de red del cliente.
+
+`OCR_PROVIDER=tesseract` usa Tesseract.js local en produccion para JPEG, PNG y WebP. Los PDFs se rechazan con un error de formato explicito. `OCR_TESSERACT_LANGS` admite combinaciones de modelos oficiales como `spa+eng`; para modelos entrenados propios, `OCR_TESSERACT_LANG_PATH` habilita los códigos adicionales y apunta a la carpeta que contiene sus archivos `.traineddata`. Los modelos oficiales pueden descargarse desde `https://github.com/tesseract-ocr/tessdata_fast/tree/main`, para evitar depender de red. El proveedor `local` sigue siendo un doble determinista bloqueado en produccion.
+
+Descarga los modelos fuera del repositorio y configura la carpeta en el entorno del servidor:
+
+```powershell
+New-Item -ItemType Directory -Force .\tessdata | Out-Null
+Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/spa.traineddata -OutFile .\tessdata\spa.traineddata
+Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata -OutFile .\tessdata\eng.traineddata
+# OCR_TESSERACT_LANGS=spa+eng
+# OCR_TESSERACT_LANG_PATH=C:\ruta\a\tessdata
+```
+
+El parser de tickets es puro, no inventa campos y conserva `null` cuando no reconoce un valor. Crear un gasto con `ocrJobId` usa los datos editados por la persona, valida propiedad, estado, permisos y pertenencia documental, y confirma el OCR y enlace del documento dentro de la misma transaccion idempotente.
+
+Las estadísticas distinguen `spentCents` (total visible), `myShareCents` (suma de `shareCents` de participantes que pertenecen al usuario autenticado) y `myPaidCents` (suma de sus pagos). El flujo de integración de estadísticas crea dos gastos con Ana como única participante, por lo que ambas métricas personales suman 9,900 centavos.
 
 ## Verificación
 

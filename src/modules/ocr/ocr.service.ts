@@ -51,6 +51,12 @@ export class OcrService {
       'UNSUPPORTED_MEDIA_TYPE',
       'El documento no admite OCR',
     );
+    ensure(
+      !(this.provider.name === 'tesseract' && document.mimeType === 'application/pdf'),
+      415,
+      'OCR_TESSERACT_PDF_UNSUPPORTED',
+      'El OCR local con Tesseract no admite PDF; sube una imagen JPEG, PNG o WebP',
+    );
     const job = await this.repository.create(documentId, userId, requestId);
     this.schedule(job.id, userId, document.storageKey, document.mimeType);
     return this.present(job);

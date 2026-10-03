@@ -242,7 +242,13 @@ export function createApp(dependencies: AppDependencies): Express {
     }),
   );
   authenticated.use('/groups/:groupId/events', createEventsRouter(dependencies.events));
-  authenticated.use('/groups/:groupId/expenses', createExpensesRouter(dependencies.expenses));
+  authenticated.use(
+    '/groups/:groupId/expenses',
+    createExpensesRouter(
+      dependencies.expenses,
+      userLimit('expenses', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiados gastos; espera un momento'),
+    ),
+  );
   authenticated.use(
     '/groups/:groupId/settlements',
     createSettlementsRouter(dependencies.settlements),

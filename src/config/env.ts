@@ -22,6 +22,14 @@ const optionalBoolean = z.preprocess((value) => {
   return value;
 }, z.boolean().optional());
 
+// Modelos oficiales frecuentes de tessdata. Los modelos personalizados se habilitan con
+// OCR_TESSERACT_LANG_PATH, sin permitir códigos desconocidos por accidente.
+const knownTesseractLanguages = new Set(
+  'afr amh ara asm aze bel ben bod bos bre bul cat ceb ces chi_sim chi_sim_vert chi_tra chi_tra_vert chr cos cym dan deu div dzo ell enm eng epo est eus fas fil fin fra frk frm frr gla gle glg grc guj hat heb hin hrv hun hye iku ind isl ita ita_old jav jpn jpn_vert kan kat kat_old kaz khm kir kmr kor kor_vert lao lat lav lit ltz mal mar mkd mlt mon mri msa mya nep nld nor oci ori osd pan pol por pus que ron rus san sin slk slv snd spa spa_old sqi srp srp_latn sun swa swe syr tam tat tel tgk tha tir ton tur uig ukr urd uzb uzb_cyrl vie yid yor'.split(
+    ' ',
+  ),
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -47,6 +55,7 @@ const envSchema = z.object({
   INVITATION_RATE_LIMIT_MAX: positiveInt.default(30),
   UPLOAD_RATE_LIMIT_MAX: positiveInt.default(30),
   OCR_RATE_LIMIT_MAX: positiveInt.default(20),
+  EXPENSE_RATE_LIMIT_MAX: positiveInt.default(60),
   PRIVACY_RATE_LIMIT_MAX: positiveInt.default(10),
   PUSH_SUBSCRIPTION_RATE_LIMIT_MAX: positiveInt.default(20),
   EMAIL_VERIFICATION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(24),
@@ -78,9 +87,15 @@ const envSchema = z.object({
     .max(25 * 1024 * 1024)
     .default(10 * 1024 * 1024),
   // OCR: disabled falla de forma explícita; http delega en un servicio externo.
-  OCR_PROVIDER: z.enum(['disabled', 'http', 'local']).default('disabled'),
+  OCR_PROVIDER: z.enum(['disabled', 'http', 'local', 'tesseract']).default('disabled'),
   OCR_HTTP_URL: optionalUrl,
   OCR_HTTP_API_KEY: optionalSecret,
+  OCR_TESSERACT_LANGS: z
+    .string()
+    .regex(/^[a-z]{3}(?:_[a-z]{3})?(?:\+[a-z]{3}(?:_[a-z]{3})?)*$/i)
+    .max(80)
+    .default('spa+eng'),
+  OCR_TESSERACT_LANG_PATH: optionalString,
   OCR_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   // Push: disabled degrada a notificaciones dentro de la app; webpush usa solo VAPID del entorno.
   PUSH_PROVIDER: z.enum(['disabled', 'webpush']).default('disabled'),
@@ -165,6 +180,16 @@ export function loadConfig(input: NodeJS.ProcessEnv = process.env) {
   }
   if (env.OCR_PROVIDER === 'http' && !env.OCR_HTTP_URL)
     fail('OCR_PROVIDER=http requiere OCR_HTTP_URL');
+  if (env.OCR_PROVIDER === 'tesseract') {
+    const unknownLanguages = env.OCR_TESSERACT_LANGS.split('+').filter(
+      (language) => !knownTesseractLanguages.has(language.toLowerCase()),
+    );
+    if (unknownLanguages.length > 0 && !env.OCR_TESSERACT_LANG_PATH) {
+      fail(
+        `OCR_TESSERACT_LANGS contiene idiomas desconocidos (${unknownLanguages.join(', ')}); configure OCR_TESSERACT_LANG_PATH para modelos locales`,
+      );
+    }
+  }
   if (env.OCR_PROVIDER === 'local' && isProduction)
     fail(
       'OCR_PROVIDER=local solo para desarrollo y pruebas; produccion debe rechazar datos ficticios',

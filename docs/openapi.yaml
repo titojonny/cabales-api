@@ -3081,6 +3081,7 @@ components:
       required: [eventId, title, totalCents, currency, splitMode, occurredAt, participants, payers]
       properties:
         eventId: { type: string, format: uuid }
+        ocrJobId: { type: string, format: uuid }
         title: { type: string, minLength: 1, maxLength: 160 }
         notes: { type: string, maxLength: 1000 }
         totalCents: { type: integer, minimum: 1, maximum: 2147483647 }
@@ -4079,6 +4080,12 @@ components:
           type: [string, 'null']
         totalCents:
           type: [integer, 'null']
+        subtotalCents:
+          type: [integer, 'null']
+        taxCents:
+          type: [integer, 'null']
+        tipCents:
+          type: [integer, 'null']
         currency:
           type: [string, 'null']
         occurredAt:
@@ -4088,16 +4095,22 @@ components:
           type: array
           items:
             type: object
-            required: [description, amountCents]
+            required: [name, amountCents]
             properties:
-              description:
+              name:
                 type: string
               amountCents:
                 type: integer
+              quantity:
+                type: integer
+              confidence:
+                type: [number, 'null']
         confidence:
-          type: number
+          type: [number, 'null']
           minimum: 0
           maximum: 1
+        confidenceByField:
+          type: [object, 'null']
     OcrJob:
       type: object
       required:

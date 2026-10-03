@@ -12,6 +12,7 @@ const allocation = z.object({ eventParticipantId: z.string().uuid(), amountCents
 export const createExpenseSchema = z
   .object({
     eventId: z.string().uuid(),
+    ocrJobId: z.string().uuid().optional(),
     title: z.string().trim().min(1).max(160),
     notes: z.string().trim().max(1000).optional(),
     categoryId: z.string().uuid().optional(),

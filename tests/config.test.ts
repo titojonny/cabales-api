@@ -51,6 +51,18 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, STORAGE_PROVIDER: 's3' })).toThrow(/S3_ENDPOINT/);
   });
 
+  it('permite Tesseract real en produccion y valida sus idiomas', () => {
+    const config = loadConfig({
+      ...production,
+      OCR_PROVIDER: 'tesseract',
+      OCR_TESSERACT_LANGS: 'spa+eng',
+    });
+    expect(config.OCR_TESSERACT_LANGS).toBe('spa+eng');
+    expect(() =>
+      loadConfig({ ...base, OCR_PROVIDER: 'tesseract', OCR_TESSERACT_LANGS: 'spa+eng+bad' }),
+    ).toThrow();
+  });
+
   it('limita la vida de URLs firmadas y exige HTTPS para VAPID en produccion', () => {
     expect(() => loadConfig({ ...base, SIGNED_URL_TTL_SECONDS: '3600' })).toThrow();
     expect(() =>

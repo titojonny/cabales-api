@@ -13,6 +13,7 @@ import {
   DisabledOcrProvider,
   HttpOcrProvider,
   LocalOcrProvider,
+  TesseractOcrProvider,
   type OcrProvider,
 } from './infrastructure/ocr.js';
 import {
@@ -95,7 +96,14 @@ export function createContainer(
         })
       : config.OCR_PROVIDER === 'local'
         ? new LocalOcrProvider()
-        : new DisabledOcrProvider());
+        : config.OCR_PROVIDER === 'tesseract'
+          ? new TesseractOcrProvider({
+              langs: config.OCR_TESSERACT_LANGS,
+              ...(config.OCR_TESSERACT_LANG_PATH
+                ? { langPath: config.OCR_TESSERACT_LANG_PATH }
+                : {}),
+            })
+          : new DisabledOcrProvider());
   const storage: FileStorageProvider =
     config.STORAGE_PROVIDER === 's3'
       ? new S3FileStorageProvider({

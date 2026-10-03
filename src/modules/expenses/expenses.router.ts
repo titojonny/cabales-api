@@ -1,24 +1,32 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { sendData } from '../../http/response.js';
 import { idempotencyHeader, uuidParam, validateBody } from '../../shared/validation.js';
 import { createExpenseSchema, type CreateExpenseInput } from './expenses.schema.js';
 import type { ExpensesService } from './expenses.service.js';
 
 /** Endpoints financieros de gastos anidados bajo el grupo. */
-export function createExpensesRouter(service: ExpensesService): Router {
+export function createExpensesRouter(
+  service: ExpensesService,
+  createLimit?: RequestHandler,
+): Router {
   const router = Router({ mergeParams: true });
-  router.post('/', validateBody(createExpenseSchema), async (req, res) => {
-    const result = await service.create(
-      req.auth!.userId,
-      uuidParam((req.params as Record<string, string | undefined>)['groupId']),
-      idempotencyHeader(req),
-      req.requestId,
-      req.body as CreateExpenseInput,
-    );
-    sendData(res, result.data, result.replayed ? 200 : 201, {
-      idempotencyReplayed: result.replayed,
-    });
-  });
+  router.post(
+    '/',
+    createLimit ?? ((_req, _res, next) => next()),
+    validateBody(createExpenseSchema),
+    async (req, res) => {
+      const result = await service.create(
+        req.auth!.userId,
+        uuidParam((req.params as Record<string, string | undefined>)['groupId']),
+        idempotencyHeader(req),
+        req.requestId,
+        req.body as CreateExpenseInput,
+      );
+      sendData(res, result.data, result.replayed ? 200 : 201, {
+        idempotencyReplayed: result.replayed,
+      });
+    },
+  );
   router.get('/', async (req, res) => {
     sendData(
       res,

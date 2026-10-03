@@ -132,6 +132,7 @@ export class ExpensesService {
 
     const expense: PreparedExpense = {
       eventId: input.eventId,
+      ...(input.ocrJobId ? { ocrJobId: input.ocrJobId } : {}),
       title: input.title,
       ...(input.notes ? { notes: input.notes } : {}),
       ...(input.categoryId ? { categoryId: input.categoryId } : {}),
@@ -179,6 +180,35 @@ export class ExpensesService {
           'PARTICIPANT_OUTSIDE_EVENT',
           'Un participante no pertenece al evento',
         );
+      }
+      if (error instanceof Error) {
+        const ocrErrors: Record<string, [number, string, string]> = {
+          OCR_JOB_NOT_FOUND: [404, 'OCR_JOB_NOT_FOUND', 'Trabajo OCR no encontrado'],
+          OCR_ALREADY_CONFIRMED: [
+            409,
+            'OCR_ALREADY_CONFIRMED',
+            'La propuesta OCR ya fue confirmada',
+          ],
+          OCR_NOT_READY: [409, 'OCR_NOT_READY', 'La propuesta OCR aún no está lista'],
+          OCR_DOCUMENT_MISSING: [409, 'OCR_DOCUMENT_MISSING', 'El documento OCR ya no existe'],
+          OCR_DOCUMENT_ALREADY_LINKED: [
+            409,
+            'OCR_DOCUMENT_ALREADY_LINKED',
+            'El documento ya está enlazado a un gasto',
+          ],
+          OCR_DOCUMENT_GROUP_MISMATCH: [
+            422,
+            'OCR_DOCUMENT_GROUP_MISMATCH',
+            'El documento OCR pertenece a otro grupo',
+          ],
+          OCR_DOCUMENT_FORBIDDEN: [
+            403,
+            'OCR_DOCUMENT_FORBIDDEN',
+            'No tienes permisos suficientes sobre el documento OCR',
+          ],
+        };
+        const mapped = ocrErrors[error.message];
+        if (mapped) throw new AppError(mapped[0], mapped[1], mapped[2]);
       }
       throw error;
     }
