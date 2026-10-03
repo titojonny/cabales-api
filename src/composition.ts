@@ -35,6 +35,8 @@ import {
   S3FileStorageProvider,
   type FileStorageProvider,
 } from './infrastructure/storage.js';
+import { DocumentEncryption } from './modules/documents/document-encryption.js';
+import { DocumentLockService } from './modules/documents/document-lock.service.js';
 import { AchievementsService } from './modules/achievements/achievements.service.js';
 import { AuthRepository } from './modules/auth/auth.repository.js';
 import { AuthService } from './modules/auth/auth.service.js';
@@ -120,6 +122,8 @@ export function createContainer(
           secretAccessKey: config.S3_SECRET_ACCESS_KEY!,
           forcePathStyle: config.S3_FORCE_PATH_STYLE ?? false,
           timeoutMs: config.EXTERNAL_TIMEOUT_MS,
+          ...(config.S3_SSE ? { serverSideEncryption: config.S3_SSE } : {}),
+          ...(config.S3_SSE_KMS_KEY_ID ? { kmsKeyId: config.S3_SSE_KMS_KEY_ID } : {}),
         })
       : new LocalFileStorageProvider(
           config.STORAGE_LOCAL_DIR,
@@ -168,6 +172,22 @@ export function createContainer(
   const documents = new DocumentsService(new DocumentsRepository(db), groups, storage, {
     maxBytes: config.MAX_UPLOAD_BYTES,
     signedUrlTtlSeconds: config.SIGNED_URL_TTL_SECONDS,
+    encryption: new DocumentEncryption(
+      config.documentEncryptionKeys,
+      config.documentEncryptionActiveKeyId,
+    ),
+    requireEncryption: config.isProduction,
+    publicApiOrigin: config.PUBLIC_API_ORIGIN,
+    publicShareOrigin: config.APP_ORIGIN,
+    ...(config.S3_SSE ? { s3Sse: config.S3_SSE } : {}),
+    ...(config.S3_SSE_KMS_KEY_ID ? { s3SseKmsKeyId: config.S3_SSE_KMS_KEY_ID } : {}),
+  });
+  const documentLock = new DocumentLockService(db, auth, {
+    unlockTtlMs: config.documentLockUnlockMs,
+    pinLockMs: config.documentLockPinLockMs,
+    maxPinAttempts: config.DOCUMENT_LOCK_PIN_MAX_ATTEMPTS,
+    rpId: config.webauthnRpId,
+    origin: config.webauthnOrigin,
   });
   const notifications = new NotificationsService(db, {
     email,
@@ -190,6 +210,12 @@ export function createContainer(
     lockTtlMs: config.SCHEDULER_LOCK_TTL_SECONDS * 1000,
     run: ({ now }) => eventReminders.run(now),
   });
+  scheduler.register({
+    name: 'document-expiry-notifications',
+    intervalMs: config.SCHEDULER_INTERVAL_SECONDS * 1000,
+    lockTtlMs: config.SCHEDULER_LOCK_TTL_SECONDS * 1000,
+    run: ({ now }) => documents.runExpiryNotifications(now, notifications),
+  });
   const achievements = new AchievementsService(db, notifications);
   domainEvents.subscribe((event) => notifications.handle(event));
   domainEvents.subscribe((event) => achievements.handle(event));
@@ -210,6 +236,7 @@ export function createContainer(
       events: domainEvents,
     }),
     documents,
+    documentLock,
     ...(storage instanceof LocalFileStorageProvider ? { localStorage: storage } : {}),
     ocr: new OcrService(new OcrRepository(db), documents, groups, ocrProvider, background, {
       maxAttempts: config.OCR_MAX_ATTEMPTS,

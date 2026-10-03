@@ -35,6 +35,8 @@ const DEFAULTS: Record<NotificationType, { inApp: boolean; email: boolean; push:
   'fund.movement': { inApp: true, email: false, push: false },
   'ocr.finished': { inApp: true, email: false, push: false },
   'privacy.updated': { inApp: true, email: true, push: false },
+  'document.expiring': { inApp: true, email: false, push: false },
+  'document.expired': { inApp: true, email: true, push: false },
   'achievement.unlocked': { inApp: true, email: false, push: false },
   'event.reminder': { inApp: true, email: false, push: false },
 };

@@ -58,7 +58,7 @@ export class OcrService {
       'El OCR local con Tesseract no admite PDF; sube una imagen JPEG, PNG o WebP',
     );
     const job = await this.repository.create(documentId, userId, requestId);
-    this.schedule(job.id, userId, document.storageKey, document.mimeType);
+    this.schedule(job.id, userId, documentId, document.mimeType);
     return this.present(job);
   }
 
@@ -88,7 +88,7 @@ export class OcrService {
     const document = await this.documents.readForProcessing(userId, job.documentId);
     const requeued = await this.repository.requeue(jobId, this.options.maxAttempts);
     ensure(requeued.count === 1, 409, 'OCR_NOT_RETRYABLE', 'El trabajo cambio de estado');
-    this.schedule(jobId, userId, document.storageKey, document.mimeType);
+    this.schedule(jobId, userId, job.documentId, document.mimeType);
     return this.present((await this.repository.find(jobId))!);
   }
 
@@ -135,16 +135,16 @@ export class OcrService {
     return this.present(confirmed);
   }
 
-  private schedule(jobId: string, userId: string, storageKey: string, mimeType: string) {
-    this.background.run('ocr.process', () => this.process(jobId, userId, storageKey, mimeType));
+  private schedule(jobId: string, userId: string, documentId: string, mimeType: string) {
+    this.background.run('ocr.process', () => this.process(jobId, userId, documentId, mimeType));
   }
 
   /** Procesa un intento; cualquier error queda como FAILED con código estable. */
-  async process(jobId: string, userId: string, storageKey: string, mimeType: string) {
+  async process(jobId: string, userId: string, documentId: string, mimeType: string) {
     if (!(await this.repository.claim(jobId))) return;
     let status: 'SUCCEEDED' | 'FAILED' = 'FAILED';
     try {
-      const bytes = await this.documents.readBytes(storageKey);
+      const { bytes } = await this.documents.readDocumentForProcessing(userId, documentId);
       const proposal = await this.provider.extract({ bytes, mimeType });
       await this.repository.succeed(jobId, proposal as unknown as Prisma.InputJsonValue);
       status = 'SUCCEEDED';

@@ -10,6 +10,8 @@ export const NOTIFICATION_TYPES = [
   'fund.movement',
   'ocr.finished',
   'privacy.updated',
+  'document.expiring',
+  'document.expired',
   'achievement.unlocked',
   'event.reminder',
 ] as const;

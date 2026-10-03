@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import path from 'node:path';
 import {
   DeleteObjectCommand,
@@ -21,8 +23,20 @@ export interface SignedObjectClaims {
 /** Puerto de almacenamiento de objetos; PostgreSQL conserva solo metadatos. */
 export interface FileStorageProvider {
   readonly name: string;
-  put(key: string, bytes: Buffer, mimeType: string): Promise<void>;
+  put(
+    key: string,
+    bytes: Buffer,
+    mimeType: string,
+    options?: { serverSideEncryption?: 'AES256' | 'aws:kms'; kmsKeyId?: string },
+  ): Promise<void>;
+  replace?(
+    key: string,
+    bytes: Buffer,
+    mimeType: string,
+    options?: { serverSideEncryption?: 'AES256' | 'aws:kms'; kmsKeyId?: string },
+  ): Promise<void>;
   get(key: string): Promise<Buffer>;
+  getStream?(key: string): Promise<Readable>;
   delete(key: string): Promise<void>;
   signedDownloadUrl(
     claims: Omit<SignedObjectClaims, 'expiresAt'>,
@@ -78,6 +92,20 @@ export class LocalFileStorageProvider implements FileStorageProvider {
     } catch (error) {
       if (error instanceof ExternalProviderError) throw error;
       throw new ExternalProviderError('storage', 'NOT_FOUND');
+    }
+  }
+
+  async getStream(key: string): Promise<Readable> {
+    return createReadStream(this.resolve(key));
+  }
+
+  async replace(key: string, bytes: Buffer): Promise<void> {
+    const full = this.resolve(key);
+    try {
+      await mkdir(path.dirname(full), { recursive: true });
+      await writeFile(full, bytes, { flag: 'w', mode: 0o600 });
+    } catch {
+      throw new ExternalProviderError('storage', 'WRITE_FAILED', true);
     }
   }
 
@@ -145,6 +173,8 @@ export class S3FileStorageProvider implements FileStorageProvider {
       secretAccessKey: string;
       forcePathStyle: boolean;
       timeoutMs: number;
+      serverSideEncryption?: 'AES256' | 'aws:kms';
+      kmsKeyId?: string;
     },
   ) {
     this.client = new S3Client({
@@ -181,7 +211,12 @@ export class S3FileStorageProvider implements FileStorageProvider {
     }
   }
 
-  async put(key: string, bytes: Buffer, mimeType: string): Promise<void> {
+  async put(
+    key: string,
+    bytes: Buffer,
+    mimeType: string,
+    putOptions?: { serverSideEncryption?: 'AES256' | 'aws:kms'; kmsKeyId?: string },
+  ): Promise<void> {
     this.validateKey(key);
     try {
       await this.request((signal) =>
@@ -193,6 +228,12 @@ export class S3FileStorageProvider implements FileStorageProvider {
               Body: bytes,
               ContentType: mimeType,
               ContentLength: bytes.length,
+              ...((putOptions?.serverSideEncryption ?? this.options.serverSideEncryption)
+                ? { ServerSideEncryption: putOptions?.serverSideEncryption ?? this.options.serverSideEncryption }
+                : {}),
+              ...((putOptions?.kmsKeyId ?? this.options.kmsKeyId)
+                ? { SSEKMSKeyId: putOptions?.kmsKeyId ?? this.options.kmsKeyId }
+                : {}),
             }),
             { abortSignal: signal },
           )
@@ -230,6 +271,34 @@ export class S3FileStorageProvider implements FileStorageProvider {
       if (statusCode === 404) throw new ExternalProviderError('storage', 'NOT_FOUND');
       throw new ExternalProviderError('storage', 'READ_FAILED', true);
     }
+  }
+
+  async getStream(key: string): Promise<Readable> {
+    this.validateKey(key);
+    try {
+      const response = await this.request((signal) =>
+        this.client.send(new GetObjectCommand({ Bucket: this.options.bucket, Key: key }), {
+          abortSignal: signal,
+        }),
+      );
+      if (!response.Body) throw new ExternalProviderError('storage', 'NOT_FOUND');
+      return Readable.from(response.Body as unknown as AsyncIterable<Uint8Array | string>);
+    } catch (error) {
+      if (error instanceof ExternalProviderError) throw error;
+      const statusCode = (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
+        ?.httpStatusCode;
+      if (statusCode === 404) throw new ExternalProviderError('storage', 'NOT_FOUND');
+      throw new ExternalProviderError('storage', 'READ_FAILED', true);
+    }
+  }
+
+  async replace(
+    key: string,
+    bytes: Buffer,
+    mimeType: string,
+    putOptions?: { serverSideEncryption?: 'AES256' | 'aws:kms'; kmsKeyId?: string },
+  ): Promise<void> {
+    return this.put(key, bytes, mimeType, putOptions);
   }
 
   async delete(key: string): Promise<void> {

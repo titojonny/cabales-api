@@ -24,7 +24,8 @@
     "db:seed": "prisma db seed",
     "db:reset": "prisma db push --force-reset && prisma db seed",
     "job:retention": "tsx src/jobs/retention.ts",
-    "job:retention:prod": "node dist/jobs/retention.js"
+    "job:retention:prod": "node dist/jobs/retention.js",
+    "docs:rotate-keys": "tsx src/jobs/document-keys-rotate.ts"
   },
   "keywords": [
     "cabales",
@@ -44,6 +45,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1142.0",
     "@aws-sdk/s3-request-presigner": "^3.1142.0",
+    "@simplewebauthn/server": "^14.0.3",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "argon2": "^0.44.0",

@@ -40,16 +40,23 @@ function implementedRoutes() {
     }
     const prefix = MOUNTS[dir];
     expect(prefix, `Router sin prefijo conocido: ${dir}`).toBeDefined();
-    const storageStart = source.indexOf('export function createLocalStorageRouter');
     for (const match of source.matchAll(ROUTE)) {
-      const base = storageStart >= 0 && match.index > storageStart ? '/storage' : prefix;
-      routes.add(`${match[1]!.toUpperCase()} ${normalize(`/api/v1${base}${match[2]}`)}`);
+      routes.add(`${match[1]!.toUpperCase()} ${normalize(`/api/v1${prefix}${match[2]}`)}`);
     }
     for (const match of source.matchAll(LOOP)) {
       for (const literal of match[1]!.matchAll(/'([^']+)'/g)) {
         routes.add(`${match[2]!.toUpperCase()} ${normalize(`/api/v1${prefix}${literal[1]}`)}`);
       }
     }
+  }
+  const sharedRouter = readFileSync(
+    path.join(modules, 'documents', 'document-shared.router.ts'),
+    'utf8',
+  );
+  for (const match of sharedRouter.matchAll(ROUTE)) {
+    routes.add(
+      `${match[1]!.toUpperCase()} ${normalize(`/api/v1/share/documents${match[2]}`)}`,
+    );
   }
   return routes;
 }

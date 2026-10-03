@@ -7,6 +7,7 @@ import { createLogger } from '../src/config/logger.js';
 import { createApp } from '../src/http/app.js';
 import { createDocumentsRouter } from '../src/modules/documents/documents.router.js';
 import type { DocumentsService } from '../src/modules/documents/documents.service.js';
+import type { DocumentLockService } from '../src/modules/documents/document-lock.service.js';
 import type { AuthContext, AuthPort, SessionResult } from '../src/modules/auth/auth.service.js';
 import type { EventsService } from '../src/modules/events/events.service.js';
 import type { ExpensesService } from '../src/modules/expenses/expenses.service.js';
@@ -114,6 +115,18 @@ describe('limites de rutas sensibles', () => {
     );
     expect(documentResponse.status).toBe(429);
     expect(documents.downloadUrl).not.toHaveBeenCalled();
+
+    const lock = { unlockPin: vi.fn() } as unknown as DocumentLockService;
+    const pinApp = authMiddleware(express());
+    pinApp.use(
+      '/documents',
+      createDocumentsRouter(documents, { maxBytes: 1024, pinLimit: limited, lock }),
+    );
+    const pinResponse = await request(pinApp)
+      .post('/documents/lock/pin')
+      .send({ pin: '123456' });
+    expect(pinResponse.status).toBe(429);
+    expect(lock.unlockPin).not.toHaveBeenCalled();
 
     const groups = { previewInvitation: vi.fn() } as unknown as GroupsService;
     const groupsApp = authMiddleware(express());

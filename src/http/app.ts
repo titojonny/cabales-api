@@ -26,10 +26,9 @@ import { createBudgetsRouter } from '../modules/budgets/budgets.router.js';
 import type { CabudasService } from '../modules/cabudas/cabudas.service.js';
 import { createCabudasRouter } from '../modules/cabudas/cabudas.router.js';
 import type { DocumentsService } from '../modules/documents/documents.service.js';
-import {
-  createDocumentsRouter,
-  createLocalStorageRouter,
-} from '../modules/documents/documents.router.js';
+import { createDocumentsRouter } from '../modules/documents/documents.router.js';
+import { createPublicSharedDocumentsRouter } from '../modules/documents/document-shared.router.js';
+import type { DocumentLockService } from '../modules/documents/document-lock.service.js';
 import type { EventsService } from '../modules/events/events.service.js';
 import { createEventsRouter } from '../modules/events/events.router.js';
 import type { ExpensesService } from '../modules/expenses/expenses.service.js';
@@ -71,6 +70,7 @@ export interface AppDependencies {
   rateLimitStores?: RateLimitStoreFactory;
   privacy?: PrivacyService;
   documents?: DocumentsService;
+  documentLock?: DocumentLockService;
   localStorage?: LocalFileStorageProvider;
   ocr?: OcrService;
   funds?: FundsService;
@@ -213,18 +213,13 @@ export function createApp(dependencies: AppDependencies): Express {
   );
   v1.use(['/auth/email-verification/confirm', '/auth/password-recovery/confirm'], tokenIp);
   v1.use('/auth', createAuthRouter(dependencies.auth, config));
-  if (dependencies.localStorage && dependencies.documents) {
+  // Las descargas actuales siempre pasan por /documents y se autorizan/descifran en la API.
+  if (dependencies.documents)
     v1.use(
-      '/storage',
-      limit(
-        'document-download',
-        config.UPLOAD_RATE_LIMIT_MAX,
-        'ip',
-        'Demasiadas descargas; espera un momento',
-      ),
-      createLocalStorageRouter(dependencies.localStorage, dependencies.documents),
+      '/share/documents',
+      limit('shared-document-download', config.SHARED_LINK_RATE_LIMIT_MAX, 'ip', 'Demasiados accesos a enlaces compartidos'),
+      createPublicSharedDocumentsRouter(dependencies.documents),
     );
-  }
 
   const authenticated = Router();
   authenticated.use(requireAuth(dependencies.auth, config.COOKIE_NAME));
@@ -291,6 +286,12 @@ export function createApp(dependencies: AppDependencies): Express {
           config.UPLOAD_RATE_LIMIT_MAX,
           'Demasiadas solicitudes de descarga; espera un momento',
         ),
+        pinLimit: userLimit(
+          'document-pin',
+          config.DOCUMENT_PIN_RATE_LIMIT_MAX,
+          'Demasiados intentos de desbloqueo; espera un momento',
+        ),
+        ...(dependencies.documentLock ? { lock: dependencies.documentLock } : {}),
       }),
     );
   }

@@ -225,7 +225,7 @@ export class AuthRepository {
   async revokeByToken(tokenHash: string) {
     await this.db.session.updateMany({
       where: { tokenHash, revokedAt: null },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: new Date(), documentsUnlockedAt: null },
     });
   }
 

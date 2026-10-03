@@ -4,6 +4,9 @@ import type { Database } from '../../database/client.js';
 export const documentView = {
   id: true,
   name: true,
+  category: true,
+  expiresAt: true,
+  expiryNoticeDays: true,
   mimeType: true,
   sizeBytes: true,
   groupId: true,
@@ -13,7 +16,14 @@ export const documentView = {
   ownerId: true,
   createdAt: true,
   updatedAt: true,
+  lastAccessedAt: true,
+  isLegacy: true,
+  encryptionKeyId: true,
+  encryptionIv: true,
+  encryptionTag: true,
+  wrappedDataKey: true,
   owner: { select: { id: true, displayName: true } },
+  pins: { select: { userId: true } },
 } as const;
 
 export type DocumentRow = Prisma.DocumentGetPayload<{ select: typeof documentView }>;
@@ -32,7 +42,7 @@ export class DocumentsRepository {
   grantFor(documentId: string, userId: string) {
     return this.db.documentAccessGrant.findUnique({
       where: { documentId_userId: { documentId, userId } },
-      select: { access: true },
+      select: { access: true, expiresAt: true },
     });
   }
 
@@ -50,6 +60,14 @@ export class DocumentsRepository {
     mimeType: string;
     sizeBytes: number;
     checksumSha256: string;
+    category: 'IDENTIDAD' | 'VIAJE' | 'SEGURO' | 'VEHICULO' | 'SALUD' | 'HOGAR' | 'FINANZAS' | 'OTRO';
+    expiresAt?: Date | null;
+    expiryNoticeDays: number[];
+    isLegacy: boolean;
+    encryptionKeyId?: string;
+    encryptionIv?: string;
+    encryptionTag?: string;
+    wrappedDataKey?: string;
     groupId?: string;
     eventId?: string;
     expenseId?: string;
@@ -72,10 +90,25 @@ export class DocumentsRepository {
     filters: Omit<Prisma.DocumentWhereInput, 'OR'>,
     cursor: string | undefined,
     limit: number,
+    pinnedForUserId?: string,
+    recentSince?: Date,
   ) {
     return this.db.document.findMany({
       where: {
         ...filters,
+        ...(pinnedForUserId ? { pins: { some: { userId: pinnedForUserId } } } : {}),
+        ...(recentSince
+          ? {
+              AND: [
+                {
+                  OR: [
+                    { createdAt: { gte: recentSince } },
+                    { lastAccessedAt: { gte: recentSince } },
+                  ],
+                },
+              ],
+            }
+          : {}),
         OR: [
           { ownerId: userId },
           { grants: { some: { userId } } },
@@ -119,7 +152,16 @@ export class DocumentsRepository {
   }
 
   logAccess(documentId: string, userId: string, action: string, requestId: string) {
-    return this.db.documentAccessLog.create({ data: { documentId, userId, action, requestId } });
+    return this.db.$transaction(async (tx) => {
+      const result = await tx.documentAccessLog.create({ data: { documentId, userId, action, requestId } });
+      if (action === 'download' || action === 'download_url')
+        await tx.document.update({ where: { id: documentId }, data: { lastAccessedAt: new Date() } });
+      return result;
+    });
+  }
+
+  logPublicAccess(documentId: string, action: string, requestId: string) {
+    return this.db.documentAccessLog.create({ data: { documentId, action, requestId } });
   }
 
   listGrants(documentId: string) {
@@ -128,6 +170,7 @@ export class DocumentsRepository {
       select: {
         userId: true,
         access: true,
+        expiresAt: true,
         createdAt: true,
         user: { select: { displayName: true } },
       },
@@ -139,17 +182,19 @@ export class DocumentsRepository {
     documentId: string,
     userId: string,
     access: DocumentAccessLevel,
+    expiresAt: Date | null | undefined,
     actorId: string,
     requestId: string,
   ) {
     return this.db.$transaction(async (tx) => {
       const grant = await tx.documentAccessGrant.upsert({
         where: { documentId_userId: { documentId, userId } },
-        create: { documentId, userId, access },
-        update: { access },
+        create: { documentId, userId, access, ...(expiresAt !== undefined ? { expiresAt } : {}) },
+        update: { access, ...(expiresAt !== undefined ? { expiresAt } : {}) },
         select: {
           userId: true,
           access: true,
+          expiresAt: true,
           createdAt: true,
           user: { select: { displayName: true } },
         },
@@ -184,6 +229,127 @@ export class DocumentsRepository {
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
+    });
+  }
+
+  pin(documentId: string, userId: string) {
+    return this.db.documentPin.upsert({
+      where: { documentId_userId: { documentId, userId } },
+      create: { documentId, userId },
+      update: {},
+    });
+  }
+
+  unpin(documentId: string, userId: string) {
+    return this.db.documentPin.deleteMany({ where: { documentId, userId } });
+  }
+
+  listSharedLinks(documentId: string) {
+    return this.db.documentSharedLink.findMany({
+      where: { documentId },
+      select: {
+        id: true,
+        expiresAt: true,
+        maxAccesses: true,
+        accessCount: true,
+        lastAccessAt: true,
+        revokedAt: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  createSharedLink(input: {
+    documentId: string;
+    createdById: string;
+    tokenHash: string;
+    expiresAt: Date;
+    maxAccesses?: number;
+  }) {
+    return this.db.documentSharedLink.create({
+      data: input,
+      select: { id: true, expiresAt: true, maxAccesses: true, accessCount: true, revokedAt: true, createdAt: true },
+    });
+  }
+
+  revokeSharedLink(documentId: string, linkId: string) {
+    return this.db.documentSharedLink.updateMany({
+      where: { id: linkId, documentId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  consumeSharedLink(tokenHash: string, now: Date) {
+    return this.db.$transaction(async (tx) => {
+      const link = await tx.documentSharedLink.findUnique({
+        where: { tokenHash },
+        select: { id: true, documentId: true, maxAccesses: true, accessCount: true, expiresAt: true, revokedAt: true },
+      });
+      if (!link || link.revokedAt || link.expiresAt <= now) return null;
+      if (link.maxAccesses !== null && link.accessCount >= link.maxAccesses) return null;
+      const updated = await tx.documentSharedLink.updateMany({
+        where: {
+          id: link.id,
+          revokedAt: null,
+          expiresAt: { gt: now },
+          ...(link.maxAccesses !== null ? { accessCount: { lt: link.maxAccesses } } : {}),
+        },
+        data: { accessCount: { increment: 1 }, lastAccessAt: now },
+      });
+      if (updated.count !== 1) return null;
+      const document = await tx.document.findUnique({
+        where: { id: link.documentId },
+        select: { ...documentView, storageKey: true },
+      });
+      return document ? { link, document } : null;
+    });
+  }
+
+  findSharedLink(tokenHash: string, now: Date) {
+    return this.db.documentSharedLink.findFirst({
+      where: { tokenHash, revokedAt: null, expiresAt: { gt: now } },
+      select: {
+        expiresAt: true,
+        maxAccesses: true,
+        accessCount: true,
+        document: { select: { name: true } },
+      },
+    });
+  }
+
+  findExpiring(now: Date) {
+    return this.db.document.findMany({
+      where: { expiresAt: { not: null } },
+      select: {
+        id: true,
+        name: true,
+        expiresAt: true,
+        expiryNoticeDays: true,
+        ownerId: true,
+        grants: { where: { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }], }, select: { userId: true } },
+        group: { select: { members: { select: { userId: true } } } },
+      },
+    });
+  }
+
+  updateEncryption(id: string, data: { encryptionKeyId: string; encryptionIv: string; encryptionTag: string; wrappedDataKey: string; isLegacy: boolean }) {
+    return this.db.document.update({ where: { id }, data });
+  }
+
+  listForKeyRotation() {
+    return this.db.document.findMany({
+      select: {
+        id: true,
+        storageKey: true,
+        mimeType: true,
+        isLegacy: true,
+        encryptionKeyId: true,
+        encryptionIv: true,
+        encryptionTag: true,
+        wrappedDataKey: true,
+      },
+      orderBy: { createdAt: 'asc' },
     });
   }
 }
