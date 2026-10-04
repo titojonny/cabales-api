@@ -109,7 +109,7 @@ pnpm exec prisma migrate status
 pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
 ```
 
-El último comando debe producir una migración vacía (sin SQL). `migrate status` debe indicar que no hay migraciones pendientes.
+Verificar siempre que `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script` quede vacío; `migrate status` debe indicar que no hay migraciones pendientes.
 
 No ejecutes `resolve` para ocultar diferencias de esquema ni borres filas de `_prisma_migrations`. Si el puente detecta o la inspección previa revela drift, detén el procedimiento y reconcilia/restaura la base; el puente solo crea los objetos ausentes y no modifica ni borra datos.
 
