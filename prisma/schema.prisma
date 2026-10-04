@@ -8,6 +8,7 @@ datasource db {
 
 enum AccountProvider {
   PASSWORD
+  GOOGLE
 }
 
 enum GroupRole {
@@ -29,9 +30,17 @@ enum EventStatus {
   CANCELLED
 }
 
+enum EventParticipantRsvpStatus {
+  PENDING
+  GOING
+  MAYBE
+  DECLINED
+}
+
 enum SplitMode {
   EQUAL
   EXACT
+  PERCENT
 }
 
 enum OcrJobStatus {
@@ -65,6 +74,12 @@ enum FundMovementType {
   ADJUSTMENT
 }
 
+enum FundAccessPolicy {
+  ANY_MEMBER
+  MANAGERS
+  GROUP_ADMINS
+}
+
 enum BudgetPeriod {
   WEEKLY
   MONTHLY
@@ -84,10 +99,27 @@ enum DocumentAccessLevel {
   MANAGE
 }
 
+enum DocumentCategory {
+  IDENTIDAD
+  VIAJE
+  SEGURO
+  VEHICULO
+  SALUD
+  HOGAR
+  FINANZAS
+  OTRO
+}
+
 enum NotificationStatus {
   UNREAD
   READ
   ARCHIVED
+}
+
+enum ScheduledJobStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
 }
 
 enum PrivacyRequestType {
@@ -131,6 +163,7 @@ model User {
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
   accounts                Account[]
+  oauthStates             OAuthState[]
   sessions                Session[]
   groupMemberships        GroupMember[]
   sentInvitations         GroupInvitation[]        @relation("InvitationSender")
@@ -138,6 +171,7 @@ model User {
   createdGroups           Group[]                  @relation("GroupCreator")
   createdEvents           Event[]                  @relation("EventCreator")
   createdExpenses         Expense[]                @relation("ExpenseCreator")
+  personalExpenses        Expense[]                @relation("PersonalExpenseOwner")
   createdSettlements      Settlement[]             @relation("SettlementCreator")
   paidTransfers           SettlementTransfer[]     @relation("TransferMarker")
   createdFunds            Fund[]                   @relation("FundCreator")
@@ -146,6 +180,11 @@ model User {
   documents               Document[]               @relation("DocumentOwner")
   documentGrants          DocumentAccessGrant[]
   documentLogs            DocumentAccessLog[]
+  documentPins            DocumentPin[]
+  createdDocumentSharedLinks DocumentSharedLink[] @relation("DocumentSharedLinkCreator")
+  documentModuleLock      DocumentModuleLock?
+  documentWebAuthnCredentials DocumentWebAuthnCredential[]
+  documentWebAuthnChallenges DocumentWebAuthnChallenge[]
   pushSubscriptions       PushSubscription[]
   notifications           Notification[]
   achievements            UserAchievement[]
@@ -156,7 +195,16 @@ model User {
   privacyRequests         PrivacyRequest[]
   requestedOcrJobs        OcrJob[]                 @relation("OcrJobRequester")
   createdBudgets          Budget[]                 @relation("BudgetCreator")
+  ownedTags               Tag[]                    @relation("PersonalTagOwner")
+  ownedCategories         Category[]               @relation("PersonalCategoryOwner")
+  ownedRecurringExpenses  RecurringExpense[]       @relation("RecurringExpenseOwner")
+  createdRecurringExpenses RecurringExpense[]      @relation("RecurringExpenseCreator")
   notificationPreferences NotificationPreference[]
+  incomes                 Income[]
+  createdPublicShareLinks PublicShareLink[] @relation("PublicShareLinkCreator")
+  createdEventComments    EventComment[] @relation("EventCommentAuthor")
+  contributionRequestsCreated FundContributionRequest[] @relation("FundContributionRequestCreator")
+  achievementRankingVisible Boolean                  @default(true)
 }
 
 /// Credencial desacoplada para permitir otros proveedores sin contaminar User.
@@ -174,6 +222,22 @@ model Account {
   @@index([userId])
 }
 
+/// Transacción OIDC de un solo uso; state y nonce solo se persisten como hashes.
+model OAuthState {
+  id           String    @id @default(uuid()) @db.Uuid
+  stateHash    String    @unique @db.Char(64)
+  nonceHash    String    @db.Char(64)
+  intent       String    @db.VarChar(16)
+  userId       String?   @db.Uuid
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime  @default(now())
+  user         User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([userId, expiresAt])
+}
+
 /// Sesión opaca revocable; solo persiste hashes de token y CSRF.
 model Session {
   id            String    @id @default(uuid()) @db.Uuid
@@ -183,6 +247,7 @@ model Session {
   expiresAt     DateTime
   revokedAt     DateTime?
   lastSeenAt    DateTime  @default(now())
+  documentsUnlockedAt DateTime?
   createdAt     DateTime  @default(now())
   userAgent     String?   @db.VarChar(512)
   ipAddress     String?   @db.VarChar(64)
@@ -213,6 +278,7 @@ model Group {
   budgets     Budget[]
   recurring   RecurringExpense[]
   documents   Document[]
+  publicShareLinks PublicShareLink[]
 
   @@index([createdById])
   @@index([createdAt])
@@ -268,6 +334,11 @@ model Event {
   name         String             @db.VarChar(160)
   description  String?            @db.VarChar(1000)
   startsAt     DateTime
+  endsAt       DateTime?
+  locationName String?            @db.VarChar(160)
+  locationAddress String?         @db.VarChar(500)
+  mapsUrl      String?            @db.VarChar(2048)
+  timeZone     String?            @db.VarChar(80)
   status       EventStatus        @default(OPEN)
   createdById  String             @db.Uuid
   createdAt    DateTime           @default(now())
@@ -276,13 +347,68 @@ model Event {
   createdBy    User               @relation("EventCreator", fields: [createdById], references: [id], onDelete: Restrict)
   participants EventParticipant[]
   links        EventLink[]
+  reminders    EventReminder[]
   expenses     Expense[]
+  recurring    RecurringExpense[]
   settlement   Settlement?
   documents    Document[]
+  funds        EventFund[]
+  comments     EventComment[]
+  publicShareLinks PublicShareLink[]
 
   @@index([groupId, startsAt])
   @@index([groupId, status])
   @@index([createdById])
+}
+
+/// Asociación explícita de eventos con fondos del mismo grupo.
+model EventFund {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String   @db.Uuid
+  fundId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  fund      Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, fundId])
+  @@index([eventId])
+  @@index([fundId])
+}
+
+/// Hilo de colaboración en texto plano; la salida HTTP nunca incluye HTML.
+model EventComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  eventId      String   @db.Uuid
+  authorUserId String   @db.Uuid
+  body         String   @db.VarChar(2000)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  author       User     @relation("EventCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([eventId, createdAt])
+  @@index([authorUserId, createdAt])
+}
+
+/// Enlace público de solo lectura; el token claro solo se entrega al crear el enlace.
+model PublicShareLink {
+  id          String     @id @default(uuid()) @db.Uuid
+  groupId     String     @db.Uuid
+  eventId     String?    @db.Uuid
+  settlementId String?   @db.Uuid
+  tokenHash   String     @unique @db.Char(64)
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdById String     @db.Uuid
+  createdAt   DateTime   @default(now())
+  group       Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event       Event?     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  settlement  Settlement? @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  createdBy   User       @relation("PublicShareLinkCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([groupId, expiresAt])
+  @@index([eventId, expiresAt])
+  @@index([settlementId, expiresAt])
 }
 
 /// Participante canónico del evento: miembro registrado XOR invitado por nombre.
@@ -291,16 +417,33 @@ model EventParticipant {
   eventId               String               @db.Uuid
   groupMemberId         String?              @db.Uuid
   guestName             String?              @db.VarChar(120)
+  rsvpStatus            EventParticipantRsvpStatus @default(PENDING)
+  respondedAt           DateTime?
   createdAt             DateTime             @default(now())
   event                 Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
   groupMember           GroupMember?         @relation(fields: [groupMemberId], references: [id], onDelete: Restrict)
   expenseParticipations ExpenseParticipant[]
+  recurringExpenses    RecurringExpenseParticipant[]
   outgoingTransfers     SettlementTransfer[] @relation("TransferDebtor")
   incomingTransfers     SettlementTransfer[] @relation("TransferCreditor")
 
   @@unique([eventId, groupMemberId])
   @@index([eventId])
   @@index([groupMemberId])
+}
+
+/// Configuración de un recordatorio relativo al inicio del evento.
+model EventReminder {
+  id            String   @id @default(uuid()) @db.Uuid
+  eventId       String   @db.Uuid
+  minutesBefore Int
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, minutesBefore])
+  @@index([eventId, enabled])
 }
 
 model EventLink {
@@ -317,22 +460,30 @@ model EventLink {
 /// Gasto inmutable en centavos una vez incluido en una liquidación.
 model Expense {
   id               String               @id @default(uuid()) @db.Uuid
-  groupId          String               @db.Uuid
-  eventId          String               @db.Uuid
+  groupId          String?              @db.Uuid
+  eventId          String?              @db.Uuid
+  ownerUserId      String?              @db.Uuid
   title            String               @db.VarChar(160)
   notes            String?              @db.VarChar(1000)
   totalCents       Int
+  subtotalCents    Int                  @default(0)
+  taxCents         Int                  @default(0)
+  tipCents         Int                  @default(0)
   currency         String               @db.Char(3)
   splitMode        SplitMode
   occurredAt       DateTime
   createdById      String               @db.Uuid
   categoryId       String?              @db.Uuid
+  recurringExpenseId String?             @db.Uuid
+  recurringPeriodKey String?             @db.VarChar(32)
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
-  group            Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  event            Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  group            Group?               @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event            Event?               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  owner            User?                @relation("PersonalExpenseOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   createdBy        User                 @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: Restrict)
   category         Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  recurringExpense RecurringExpense?    @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
   participants     ExpenseParticipant[]
   payers           ExpensePayer[]
   items            ExpenseItem[]
@@ -344,16 +495,21 @@ model Expense {
   @@index([groupId, occurredAt])
   @@index([eventId, occurredAt])
   @@index([createdById])
+  @@index([ownerUserId, occurredAt])
   @@index([categoryId])
+  @@unique([recurringExpenseId, recurringPeriodKey])
 }
 
-/// Parte exacta de un participante; el servicio exige shareCents > 0 y suma igual al gasto.
+/// Desglose exacto de un participante; la suma de sus tres componentes es shareCents.
 model ExpenseParticipant {
   id                 String                  @id @default(uuid()) @db.Uuid
   expenseId          String                  @db.Uuid
   eventParticipantId String                  @db.Uuid
   /// Copia consultable de EventParticipant.groupMemberId, fijada por el repositorio al crear el gasto.
   groupMemberId      String?                 @db.Uuid
+  subtotalCents      Int                     @default(0)
+  taxCents           Int                     @default(0)
+  tipCents           Int                     @default(0)
   shareCents         Int
   expense            Expense                 @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   eventParticipant   EventParticipant        @relation(fields: [eventParticipantId], references: [id], onDelete: Restrict)
@@ -459,6 +615,7 @@ model Settlement {
   createdBy   User                 @relation("SettlementCreator", fields: [createdById], references: [id], onDelete: Restrict)
   transfers   SettlementTransfer[]
   documents   Document[]
+  publicShareLinks PublicShareLink[]
 
   @@index([groupId, createdAt])
   @@index([createdById])
@@ -470,6 +627,8 @@ model SettlementTransfer {
   debtorParticipantId   String                  @db.Uuid
   creditorParticipantId String                  @db.Uuid
   amountCents           Int
+  /// Fecha objetiva del pago: fin del evento o inicio si no se definio fin.
+  dueAt                 DateTime?
   status                TransferStatus          @default(PENDING)
   paidAt                DateTime?
   markedPaidById        String?                 @db.Uuid
@@ -513,10 +672,16 @@ model Fund {
   archivedAt  DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @default(now()) @updatedAt
+  contributionPolicy FundAccessPolicy @default(ANY_MEMBER)
+  withdrawalPolicy FundAccessPolicy @default(MANAGERS)
+  closingPolicy FundAccessPolicy @default(MANAGERS)
+  withdrawalLimitCents Int?
   group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
   createdBy   User           @relation("FundCreator", fields: [createdById], references: [id], onDelete: Restrict)
   members     FundMember[]
   movements   FundMovement[]
+  eventLinks  EventFund[]
+  contributionRequests FundContributionRequest[]
 
   @@unique([groupId, name])
   @@index([createdById])
@@ -530,6 +695,7 @@ model FundMember {
   joinedAt      DateTime    @default(now())
   fund          Fund        @relation(fields: [fundId], references: [id], onDelete: Cascade)
   groupMember   GroupMember @relation(fields: [groupMemberId], references: [id], onDelete: Cascade)
+  contributionRequestMembers FundContributionRequestMember[]
 
   @@unique([fundId, groupMemberId])
   @@index([groupMemberId])
@@ -544,34 +710,79 @@ model FundMovement {
   description String?          @db.VarChar(500)
   createdById String           @db.Uuid
   createdAt   DateTime         @default(now())
+  contributionRequestMemberId String? @unique @db.Uuid
   fund        Fund             @relation(fields: [fundId], references: [id], onDelete: Cascade)
   createdBy   User             @relation("FundMovementCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  contributionRequestMember FundContributionRequestMember? @relation(fields: [contributionRequestMemberId], references: [id], onDelete: SetNull)
 
   @@index([fundId, createdAt])
   @@index([createdById])
 }
 
+/// Solicitud de aporte creada por un gestor del fondo; los importes son por integrante.
+model FundContributionRequest {
+  id          String   @id @default(uuid()) @db.Uuid
+  fundId      String   @db.Uuid
+  createdById String   @db.Uuid
+  dueAt       DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  fund        Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation("FundContributionRequestCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members     FundContributionRequestMember[]
+
+  @@index([fundId, dueAt])
+  @@index([createdById])
+}
+
+/// Estado individual de una solicitud: se paga al enlazar el movimiento de aporte.
+model FundContributionRequestMember {
+  id           String   @id @default(uuid()) @db.Uuid
+  requestId    String   @db.Uuid
+  fundMemberId String   @db.Uuid
+  amountCents  Int
+  status       String   @default("PENDING") @db.VarChar(16)
+  paidAt       DateTime?
+  request      FundContributionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  fundMember   FundMember @relation(fields: [fundMemberId], references: [id], onDelete: Cascade)
+  paidMovement FundMovement?
+
+  @@unique([requestId, fundMemberId])
+  @@index([fundMemberId, status])
+  @@index([requestId, status])
+}
+
 model Category {
-  id       String    @id @default(uuid()) @db.Uuid
-  groupId  String?   @db.Uuid
-  name     String    @db.VarChar(80)
-  color    String?   @db.VarChar(20)
-  group    Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid()) @db.Uuid
+  groupId     String?   @db.Uuid
+  ownerUserId String?   @db.Uuid
+  name        String    @db.VarChar(80)
+  color       String?   @db.VarChar(20)
+  group       Group?    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  owner       User?     @relation("PersonalCategoryOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   expenses Expense[]
   budgets  Budget[]
+  recurring RecurringExpense[]
 
   @@unique([groupId, name])
+  @@unique([ownerUserId, name])
   @@index([groupId])
+  @@index([ownerUserId])
 }
 
 model Tag {
-  id       String       @id @default(uuid()) @db.Uuid
-  groupId  String       @db.Uuid
-  name     String       @db.VarChar(50)
-  group    Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id          String       @id @default(uuid()) @db.Uuid
+  groupId     String?      @db.Uuid
+  ownerUserId String?      @db.Uuid
+  name        String       @db.VarChar(50)
+  group       Group?       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  owner       User?        @relation("PersonalTagOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   expenses ExpenseTag[]
+  recurringExpenses RecurringExpenseTag[]
 
   @@unique([groupId, name])
+  @@unique([ownerUserId, name])
+  @@index([ownerUserId])
 }
 
 model ExpenseTag {
@@ -609,19 +820,75 @@ model Budget {
 }
 
 model RecurringExpense {
-  id          String             @id @default(uuid()) @db.Uuid
-  groupId     String             @db.Uuid
-  title       String             @db.VarChar(160)
-  amountCents Int
-  currency    String             @db.Char(3)
-  frequency   RecurringFrequency
-  nextRunAt   DateTime
-  isActive    Boolean            @default(true)
-  createdAt   DateTime           @default(now())
-  group       Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id             String                          @id @default(uuid()) @db.Uuid
+  groupId        String?                         @db.Uuid
+  eventId        String?                         @db.Uuid
+  ownerUserId    String?                         @db.Uuid
+  createdById    String?                         @db.Uuid
+  title          String                          @db.VarChar(160)
+  notes          String?                         @db.VarChar(1000)
+  amountCents    Int
+  currency       String                          @db.Char(3)
+  categoryId     String?                         @db.Uuid
+  frequency      RecurringFrequency
+  chargeDay      Int                             @default(1)
+  nextRunAt      DateTime
+  endsAt         DateTime?
+  isActive       Boolean                         @default(true)
+  createdAt      DateTime                        @default(now())
+  updatedAt      DateTime                        @default(now()) @updatedAt
+  group          Group?                          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event          Event?                          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  owner          User?                           @relation("RecurringExpenseOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  createdBy      User?                           @relation("RecurringExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  category       Category?                       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  participants   RecurringExpenseParticipant[]
+  tags           RecurringExpenseTag[]
+  expenses       Expense[]
 
   @@index([groupId, isActive])
+  @@index([ownerUserId, isActive])
   @@index([nextRunAt, isActive])
+}
+
+/// Ingreso personal independiente de grupos, gastos compartidos y documentos.
+model Income {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  amountCents Int
+  date        DateTime
+  category    String   @db.VarChar(80)
+  note        String?  @db.VarChar(500)
+  currency    String   @db.Char(3)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@index([userId, currency, date])
+}
+
+model RecurringExpenseParticipant {
+  id                 String           @id @default(uuid()) @db.Uuid
+  recurringExpenseId String           @db.Uuid
+  eventParticipantId String           @db.Uuid
+  shareCents         Int
+  payerAmountCents   Int?
+  recurringExpense   RecurringExpense @relation(fields: [recurringExpenseId], references: [id], onDelete: Cascade)
+  eventParticipant   EventParticipant @relation(fields: [eventParticipantId], references: [id], onDelete: Restrict)
+
+  @@unique([recurringExpenseId, eventParticipantId])
+  @@index([eventParticipantId])
+}
+
+model RecurringExpenseTag {
+  recurringExpenseId String           @db.Uuid
+  tagId              String           @db.Uuid
+  recurringExpense   RecurringExpense @relation(fields: [recurringExpenseId], references: [id], onDelete: Cascade)
+  tag                Tag              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([recurringExpenseId, tagId])
+  @@index([tagId])
 }
 
 model Document {
@@ -629,6 +896,9 @@ model Document {
   groupId        String?               @db.Uuid
   ownerId        String                @db.Uuid
   name           String                @db.VarChar(255)
+  category       DocumentCategory      @default(OTRO)
+  expiresAt      DateTime?
+  expiryNoticeDays Int[]               @default([30, 7])
   storageKey     String                @unique @db.VarChar(512)
   mimeType       String                @db.VarChar(100)
   sizeBytes      Int                   @default(0)
@@ -638,6 +908,12 @@ model Document {
   settlementId   String?               @db.Uuid
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
+  lastAccessedAt DateTime?
+  isLegacy       Boolean               @default(true)
+  encryptionKeyId String?              @db.VarChar(80)
+  encryptionIv   String?               @db.VarChar(64)
+  encryptionTag  String?               @db.VarChar(64)
+  wrappedDataKey String?               @db.Text
   group          Group?                @relation(fields: [groupId], references: [id], onDelete: Cascade)
   owner          User                  @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   event          Event?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
@@ -646,12 +922,17 @@ model Document {
   grants         DocumentAccessGrant[]
   logs           DocumentAccessLog[]
   ocrJobs        OcrJob[]
+  pins           DocumentPin[]
+  sharedLinks    DocumentSharedLink[]
 
   @@index([groupId, createdAt])
   @@index([ownerId, createdAt])
   @@index([eventId])
   @@index([expenseId])
   @@index([settlementId])
+  @@index([expiresAt])
+  @@index([category, createdAt])
+  @@index([lastAccessedAt])
 }
 
 model DocumentAccessGrant {
@@ -659,12 +940,83 @@ model DocumentAccessGrant {
   documentId String              @db.Uuid
   userId     String              @db.Uuid
   access     DocumentAccessLevel
+  expiresAt  DateTime?
   createdAt  DateTime            @default(now())
   document   Document            @relation(fields: [documentId], references: [id], onDelete: Cascade)
   user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([documentId, userId])
   @@index([userId])
+}
+
+model DocumentPin {
+  id         String   @id @default(uuid()) @db.Uuid
+  documentId String   @db.Uuid
+  userId     String   @db.Uuid
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([userId, createdAt])
+}
+
+model DocumentSharedLink {
+  id          String    @id @default(uuid()) @db.Uuid
+  documentId  String    @db.Uuid
+  createdById String    @db.Uuid
+  tokenHash   String    @unique @db.Char(64)
+  expiresAt   DateTime
+  maxAccesses Int?
+  accessCount Int       @default(0)
+  lastAccessAt DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  document    Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("DocumentSharedLinkCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([documentId, revokedAt, expiresAt])
+  @@index([expiresAt])
+}
+
+model DocumentModuleLock {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @unique @db.Uuid
+  pinHash           String?   @db.VarChar(512)
+  pinFailedAttempts Int       @default(0)
+  pinLockedUntil    DateTime?
+  unlockTtlMinutes  Int       @default(10)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DocumentWebAuthnCredential {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  credentialId String   @unique @db.VarChar(512)
+  publicKey    String   @db.Text
+  counter      Int      @default(0)
+  transports   String[] @default([])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model DocumentWebAuthnChallenge {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @db.Uuid
+  type          String    @db.VarChar(20)
+  challengeHash String    @db.Char(64)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, expiresAt])
+  @@index([challengeHash])
 }
 
 model DocumentAccessLog {
@@ -726,6 +1078,21 @@ model NotificationPreference {
   @@id([userId, type])
 }
 
+/// Estado persistente de una ejecución periódica; la clave representa una ventana idempotente.
+model ScheduledJobRun {
+  id           String            @id @default(uuid()) @db.Uuid
+  jobKey       String            @unique @db.VarChar(200)
+  status       ScheduledJobStatus @default(RUNNING)
+  attempts     Int               @default(0)
+  lastErrorCode String?          @db.VarChar(80)
+  startedAt    DateTime          @default(now())
+  finishedAt   DateTime?
+  updatedAt    DateTime          @updatedAt
+
+  @@index([status, updatedAt])
+  @@index([startedAt])
+}
+
 model Achievement {
   id          String            @id @default(uuid()) @db.Uuid
   code        String            @unique @db.VarChar(80)
@@ -738,6 +1105,7 @@ model UserAchievement {
   userId        String      @db.Uuid
   achievementId String      @db.Uuid
   awardedAt     DateTime    @default(now())
+  level         String      @default("BRONZE") @db.VarChar(10)
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
 

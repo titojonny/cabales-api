@@ -19,27 +19,35 @@ import {
 import type { LocalFileStorageProvider } from '../infrastructure/storage.js';
 import type { AchievementsService } from '../modules/achievements/achievements.service.js';
 import { createAchievementsRouter } from '../modules/achievements/achievements.router.js';
+import { createGroupAchievementsRouter } from '../modules/achievements/achievements-group.router.js';
 import type { AuthPort } from '../modules/auth/auth.service.js';
 import { createAuthRouter } from '../modules/auth/auth.router.js';
 import type { BudgetsService } from '../modules/budgets/budgets.service.js';
 import { createBudgetsRouter } from '../modules/budgets/budgets.router.js';
 import type { CabudasService } from '../modules/cabudas/cabudas.service.js';
 import { createCabudasRouter } from '../modules/cabudas/cabudas.router.js';
+import type { CollaborationService } from '../modules/collaboration/collaboration.service.js';
+import { createCalendarRouter, createEventCollaborationRouter, createExpenseCollaborationRouter, createGroupCollaborationRouter, createPublicShareRouter } from '../modules/collaboration/collaboration.router.js';
+import type { PersonalCategoriesService } from '../modules/categories/categories.service.js';
+import { createPersonalCategoriesRouter } from '../modules/categories/categories.router.js';
 import type { DocumentsService } from '../modules/documents/documents.service.js';
-import {
-  createDocumentsRouter,
-  createLocalStorageRouter,
-} from '../modules/documents/documents.router.js';
+import { createDocumentsRouter } from '../modules/documents/documents.router.js';
+import { createPublicSharedDocumentsRouter } from '../modules/documents/document-shared.router.js';
+import type { DocumentLockService } from '../modules/documents/document-lock.service.js';
 import type { EventsService } from '../modules/events/events.service.js';
 import { createEventsRouter } from '../modules/events/events.router.js';
 import type { ExpensesService } from '../modules/expenses/expenses.service.js';
 import { createExpensesRouter } from '../modules/expenses/expenses.router.js';
+import type { PersonalExpensesService } from '../modules/expenses/personal-expenses.service.js';
+import { createPersonalExpensesRouter } from '../modules/expenses/personal-expenses.router.js';
 import type { FundsService } from '../modules/funds/funds.service.js';
 import { createFundsRouter } from '../modules/funds/funds.router.js';
 import type { GroupsService } from '../modules/groups/groups.service.js';
 import { createGroupsRouter } from '../modules/groups/groups.router.js';
 import type { NotificationsService } from '../modules/notifications/notifications.service.js';
 import { createNotificationsRouter } from '../modules/notifications/notifications.router.js';
+import type { IncomesService } from '../modules/incomes/incomes.service.js';
+import { createIncomesRouter } from '../modules/incomes/incomes.router.js';
 import type { OcrService } from '../modules/ocr/ocr.service.js';
 import { createOcrRouter } from '../modules/ocr/ocr.router.js';
 import type { PrivacyService } from '../modules/privacy/privacy.service.js';
@@ -48,6 +56,10 @@ import type { SettlementsService } from '../modules/settlements/settlements.serv
 import { createSettlementsRouter } from '../modules/settlements/settlements.router.js';
 import type { StatisticsService } from '../modules/statistics/statistics.service.js';
 import { createStatisticsRouter } from '../modules/statistics/statistics.router.js';
+import type { RecurringExpensesService } from '../modules/recurring-expenses/recurring-expenses.service.js';
+import { createGroupRecurringRouter, createPersonalRecurringRouter } from '../modules/recurring-expenses/recurring-expenses.router.js';
+import type { TagsService } from '../modules/tags/tags.service.js';
+import { createGroupTagsRouter, createPersonalTagsRouter } from '../modules/tags/tags.router.js';
 import {
   errorHandler,
   notFound,
@@ -66,11 +78,16 @@ export interface AppDependencies {
   groups: GroupsService;
   events: EventsService;
   expenses: ExpensesService;
+  personalExpenses?: PersonalExpensesService;
+  personalCategories?: PersonalCategoriesService;
+  recurringExpenses?: RecurringExpensesService;
+  tags?: TagsService;
   settlements: SettlementsService;
   readiness: () => Promise<boolean>;
   rateLimitStores?: RateLimitStoreFactory;
   privacy?: PrivacyService;
   documents?: DocumentsService;
+  documentLock?: DocumentLockService;
   localStorage?: LocalFileStorageProvider;
   ocr?: OcrService;
   funds?: FundsService;
@@ -79,6 +96,8 @@ export interface AppDependencies {
   statistics?: StatisticsService;
   notifications?: NotificationsService;
   achievements?: AchievementsService;
+  incomes?: IncomesService;
+  collaboration?: CollaborationService;
 }
 
 function protectMutations(cookieName: string) {
@@ -200,6 +219,12 @@ export function createApp(dependencies: AppDependencies): Express {
     'ip',
     'Demasiados intentos con enlaces',
   );
+  const googleCallbackIp = limit(
+    'google-oauth-callback',
+    config.AUTH_RATE_LIMIT_MAX * 2,
+    'ip',
+    'Demasiados intentos de inicio con Google',
+  );
   v1.use(['/auth/login', '/auth/register'], authIp, authEmail);
   v1.use(
     [
@@ -212,25 +237,48 @@ export function createApp(dependencies: AppDependencies): Express {
     recoveryEmail,
   );
   v1.use(['/auth/email-verification/confirm', '/auth/password-recovery/confirm'], tokenIp);
+  v1.use('/auth/google/callback', googleCallbackIp);
   v1.use('/auth', createAuthRouter(dependencies.auth, config));
-  if (dependencies.localStorage && dependencies.documents) {
+  // Las descargas actuales siempre pasan por /documents y se autorizan/descifran en la API.
+  if (dependencies.documents)
     v1.use(
-      '/storage',
-      limit(
-        'document-download',
-        config.UPLOAD_RATE_LIMIT_MAX,
-        'ip',
-        'Demasiadas descargas; espera un momento',
-      ),
-      createLocalStorageRouter(dependencies.localStorage, dependencies.documents),
+      '/share/documents',
+      limit('shared-document-download', config.SHARED_LINK_RATE_LIMIT_MAX, 'ip', 'Demasiados accesos a enlaces compartidos'),
+      createPublicSharedDocumentsRouter(dependencies.documents),
     );
-  }
+  if (dependencies.collaboration)
+    v1.use(
+      '/share/summaries',
+      limit('public-summary-share', config.SHARED_LINK_RATE_LIMIT_MAX, 'ip', 'Demasiados accesos a enlaces compartidos'),
+      createPublicShareRouter(dependencies.collaboration),
+    );
 
   const authenticated = Router();
   authenticated.use(requireAuth(dependencies.auth, config.COOKIE_NAME));
   authenticated.use(protectMutations(config.COOKIE_NAME));
   const userLimit = (name: string, max: number, message: string): RequestHandler =>
     limit(name, max, 'user', message);
+  if (dependencies.collaboration) {
+    const collaborationWriteLimit = userLimit('collaboration-writes', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas acciones de colaboracion; espera un momento');
+    authenticated.use('/calendar', createCalendarRouter(dependencies.collaboration));
+    authenticated.use('/groups', createGroupCollaborationRouter(dependencies.collaboration, { writeLimit: collaborationWriteLimit }));
+    authenticated.use('/groups/:groupId/events', createEventCollaborationRouter(dependencies.collaboration, { writeLimit: collaborationWriteLimit }));
+    authenticated.use('/groups/:groupId/expenses', createExpenseCollaborationRouter(dependencies.collaboration));
+  }
+  if (dependencies.personalExpenses) {
+    authenticated.use(
+      '/expenses',
+      createPersonalExpensesRouter(
+        dependencies.personalExpenses,
+        userLimit('personal-expenses', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiados gastos; espera un momento'),
+      ),
+    );
+  }
+  if (dependencies.personalCategories)
+    authenticated.use('/categories', createPersonalCategoriesRouter(dependencies.personalCategories, userLimit('personal-categories', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas categorias; espera un momento')));
+  if (dependencies.recurringExpenses)
+    authenticated.use('/recurring-expenses', createPersonalRecurringRouter(dependencies.recurringExpenses, userLimit('personal-recurring', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas recurrencias; espera un momento')));
+  if (dependencies.tags) authenticated.use('/tags', createPersonalTagsRouter(dependencies.tags, userLimit('personal-tags', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas etiquetas; espera un momento')));
   authenticated.use(
     '/groups',
     createGroupsRouter(dependencies.groups, {
@@ -241,14 +289,41 @@ export function createApp(dependencies: AppDependencies): Express {
       ),
     }),
   );
-  authenticated.use('/groups/:groupId/events', createEventsRouter(dependencies.events));
-  authenticated.use('/groups/:groupId/expenses', createExpensesRouter(dependencies.expenses));
+  if (dependencies.tags)
+    authenticated.use('/groups/:groupId/tags', createGroupTagsRouter(dependencies.tags, userLimit('group-tags', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas etiquetas; espera un momento')));
+  if (dependencies.recurringExpenses)
+    authenticated.use('/groups/:groupId/recurring-expenses', createGroupRecurringRouter(dependencies.recurringExpenses, userLimit('group-recurring', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas recurrencias; espera un momento')));
+  authenticated.use(
+    '/groups/:groupId/events',
+    createEventsRouter(dependencies.events, {
+      rsvpLimit: userLimit(
+        'event-rsvp',
+        config.EVENT_RSVP_RATE_LIMIT_MAX,
+        'Demasiadas respuestas RSVP',
+      ),
+    }),
+  );
+  authenticated.use(
+    '/groups/:groupId/expenses',
+    createExpensesRouter(
+      dependencies.expenses,
+      userLimit('expenses', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiados gastos; espera un momento'),
+    ),
+  );
   authenticated.use(
     '/groups/:groupId/settlements',
     createSettlementsRouter(dependencies.settlements),
   );
   if (dependencies.funds)
-    authenticated.use('/groups/:groupId/funds', createFundsRouter(dependencies.funds));
+    authenticated.use(
+      '/groups/:groupId/funds',
+      userLimit(
+        'fund-contribution-requests',
+        config.EXPENSE_RATE_LIMIT_MAX,
+        'Demasiadas operaciones de fondos; espera un momento',
+      ),
+      createFundsRouter(dependencies.funds),
+    );
   if (dependencies.budgets)
     authenticated.use('/groups/:groupId/budgets', createBudgetsRouter(dependencies.budgets));
   if (dependencies.privacy) {
@@ -276,6 +351,12 @@ export function createApp(dependencies: AppDependencies): Express {
           config.UPLOAD_RATE_LIMIT_MAX,
           'Demasiadas solicitudes de descarga; espera un momento',
         ),
+        pinLimit: userLimit(
+          'document-pin',
+          config.DOCUMENT_PIN_RATE_LIMIT_MAX,
+          'Demasiados intentos de desbloqueo; espera un momento',
+        ),
+        ...(dependencies.documentLock ? { lock: dependencies.documentLock } : {}),
       }),
     );
   }
@@ -303,6 +384,12 @@ export function createApp(dependencies: AppDependencies): Express {
         config.STATISTICS_EXPORT_MAX_ROWS,
       ),
     );
+  if (dependencies.incomes)
+    authenticated.use(
+      '/incomes',
+      userLimit('incomes', config.INCOME_RATE_LIMIT_MAX, 'Demasiadas operaciones de ingresos'),
+      createIncomesRouter(dependencies.incomes),
+    );
   if (dependencies.notifications) {
     const pushSubscriptionLimit = userLimit(
       'push-subscriptions',
@@ -314,7 +401,25 @@ export function createApp(dependencies: AppDependencies): Express {
     authenticated.use('/notifications', createNotificationsRouter(dependencies.notifications));
   }
   if (dependencies.achievements)
-    authenticated.use('/achievements', createAchievementsRouter(dependencies.achievements));
+    authenticated.use(
+      '/achievements',
+      userLimit(
+        'achievements',
+        config.EXPENSE_RATE_LIMIT_MAX,
+        'Demasiadas consultas de logros; espera un momento',
+      ),
+      createAchievementsRouter(dependencies.achievements),
+    );
+  if (dependencies.achievements)
+    authenticated.use(
+      '/groups/:groupId/achievements',
+      userLimit(
+        'group-achievements',
+        config.EXPENSE_RATE_LIMIT_MAX,
+        'Demasiadas consultas de logros; espera un momento',
+      ),
+      createGroupAchievementsRouter(dependencies.achievements),
+    );
   v1.use(authenticated);
   app.use('/api/v1', v1);
   app.use(notFound);

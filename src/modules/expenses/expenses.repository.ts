@@ -1,4 +1,11 @@
-import { EventStatus, Prisma, type SplitMode } from '@prisma/client';
+import {
+  DocumentAccessLevel,
+  EventStatus,
+  GroupRole,
+  OcrJobStatus,
+  Prisma,
+  type SplitMode,
+} from '@prisma/client';
 import type { Database } from '../../database/client.js';
 import { withSerializableRetry } from '../../database/transaction.js';
 import { isIdempotencyActive } from '../../shared/idempotency.js';
@@ -6,14 +13,24 @@ import { isIdempotencyActive } from '../../shared/idempotency.js';
 /** Gasto con invariantes ya comprobadas y listo para persistencia atómica. */
 export interface PreparedExpense {
   eventId: string;
+  ocrJobId?: string;
   title: string;
   notes?: string;
   categoryId?: string;
   totalCents: number;
+  subtotalCents: number;
+  taxCents: number;
+  tipCents: number;
   currency: string;
   splitMode: SplitMode;
   occurredAt: Date;
-  participants: Array<{ eventParticipantId: string; shareCents: number }>;
+  participants: Array<{
+    eventParticipantId: string;
+    subtotalCents: number;
+    taxCents: number;
+    tipCents: number;
+    shareCents: number;
+  }>;
   payers: Array<{ eventParticipantId: string; amountCents: number }>;
   items: Array<{
     name: string;
@@ -21,24 +38,34 @@ export interface PreparedExpense {
     quantity: number;
     allocations: Array<{ eventParticipantId: string; amountCents: number }>;
   }>;
+  tagIds: string[];
 }
 
-const expenseDetail = {
+export const expenseDetail = {
   id: true,
   groupId: true,
   eventId: true,
   title: true,
   notes: true,
   totalCents: true,
+  subtotalCents: true,
+  taxCents: true,
+  tipCents: true,
   currency: true,
   splitMode: true,
   occurredAt: true,
   createdAt: true,
   categoryId: true,
+  ownerUserId: true,
+  recurringExpenseId: true,
+  tags: { select: { tag: { select: { id: true, name: true, groupId: true, ownerUserId: true } } } },
   participants: {
     select: {
       id: true,
       eventParticipantId: true,
+      subtotalCents: true,
+      taxCents: true,
+      tipCents: true,
       shareCents: true,
       eventParticipant: { select: { guestName: true, groupMemberId: true } },
     },
@@ -83,20 +110,34 @@ export class ExpensesRepository {
     });
   }
 
-  list(groupId: string) {
+  list(groupId: string, filters: { tagId?: string; categoryId?: string; from?: Date; to?: Date; text?: string } = {}) {
     return this.db.expense.findMany({
-      where: { groupId },
+      where: {
+        groupId,
+        ...(filters.categoryId ? { categoryId: filters.categoryId } : {}),
+        ...(filters.tagId ? { tags: { some: { tagId: filters.tagId } } } : {}),
+        ...(filters.from || filters.to
+          ? { occurredAt: { ...(filters.from ? { gte: filters.from } : {}), ...(filters.to ? { lt: filters.to } : {}) } }
+          : {}),
+        ...(filters.text
+          ? { OR: [{ title: { contains: filters.text, mode: 'insensitive' as const } }, { notes: { contains: filters.text, mode: 'insensitive' as const } }] }
+          : {}),
+      },
       take: 100,
       select: {
         id: true,
         eventId: true,
         title: true,
         totalCents: true,
+        subtotalCents: true,
+        taxCents: true,
+        tipCents: true,
         currency: true,
         splitMode: true,
         occurredAt: true,
         createdAt: true,
         categoryId: true,
+        tags: { select: { tag: { select: { id: true, name: true } } } },
         _count: { select: { participants: true, items: true } },
       },
       orderBy: [{ occurredAt: 'desc' }, { id: 'asc' }],
@@ -144,6 +185,13 @@ export class ExpensesRepository {
             if (lockedGroups[0]?.currency !== input.expense.currency) {
               throw new Error('CURRENCY_MISMATCH');
             }
+            if (input.expense.tagIds.length > 0) {
+              const tags = await tx.tag.findMany({
+                where: { id: { in: input.expense.tagIds }, groupId: input.groupId },
+                select: { id: true },
+              });
+              if (tags.length !== input.expense.tagIds.length) throw new Error('TAG_OUTSIDE_GROUP');
+            }
 
             const event = await tx.event.findFirst({
               where: { id: input.expense.eventId, groupId: input.groupId },
@@ -151,6 +199,59 @@ export class ExpensesRepository {
             });
             if (!event || event.status !== EventStatus.OPEN || event.settlement) {
               throw new Error('EVENT_LOCKED');
+            }
+
+            let ocrDocumentId: string | undefined;
+            if (input.expense.ocrJobId) {
+              const ocrJob = await tx.ocrJob.findUnique({
+                where: { id: input.expense.ocrJobId },
+                select: {
+                  id: true,
+                  requestedById: true,
+                  status: true,
+                  confirmedAt: true,
+                  documentId: true,
+                  document: {
+                    select: {
+                      id: true,
+                      groupId: true,
+                      ownerId: true,
+                      expenseId: true,
+                      grants: {
+                        where: { userId: input.userId },
+                        select: { access: true },
+                      },
+                    },
+                  },
+                },
+              });
+              if (!ocrJob || ocrJob.requestedById !== input.userId)
+                throw new Error('OCR_JOB_NOT_FOUND');
+              if (ocrJob.confirmedAt) throw new Error('OCR_ALREADY_CONFIRMED');
+              if (ocrJob.status !== OcrJobStatus.SUCCEEDED) throw new Error('OCR_NOT_READY');
+              if (!ocrJob.documentId || !ocrJob.document) throw new Error('OCR_DOCUMENT_MISSING');
+              if (ocrJob.document.expenseId) throw new Error('OCR_DOCUMENT_ALREADY_LINKED');
+              if (ocrJob.document.groupId && ocrJob.document.groupId !== input.groupId)
+                throw new Error('OCR_DOCUMENT_GROUP_MISMATCH');
+
+              const membership = ocrJob.document.groupId
+                ? await tx.groupMember.findUnique({
+                    where: {
+                      groupId_userId: { groupId: ocrJob.document.groupId, userId: input.userId },
+                    },
+                    select: { role: true },
+                  })
+                : null;
+              const canLink =
+                ocrJob.document.ownerId === input.userId ||
+                ocrJob.document.grants.some(
+                  ({ access }) =>
+                    access === DocumentAccessLevel.EDIT || access === DocumentAccessLevel.MANAGE,
+                ) ||
+                membership?.role === GroupRole.OWNER ||
+                membership?.role === GroupRole.ADMIN;
+              if (!canLink) throw new Error('OCR_DOCUMENT_FORBIDDEN');
+              ocrDocumentId = ocrJob.document.id;
             }
 
             const participantIds = input.expense.participants.map(
@@ -176,9 +277,15 @@ export class ExpensesRepository {
                 ...(input.expense.notes ? { notes: input.expense.notes } : {}),
                 ...(input.expense.categoryId ? { categoryId: input.expense.categoryId } : {}),
                 totalCents: input.expense.totalCents,
+                subtotalCents: input.expense.subtotalCents,
+                taxCents: input.expense.taxCents,
+                tipCents: input.expense.tipCents,
                 currency: input.expense.currency,
                 splitMode: input.expense.splitMode,
                 occurredAt: input.expense.occurredAt,
+                ...(input.expense.tagIds.length > 0
+                  ? { tags: { create: input.expense.tagIds.map((tagId) => ({ tagId })) } }
+                  : {}),
               },
             });
             await tx.expenseParticipant.createMany({
@@ -222,6 +329,22 @@ export class ExpensesRepository {
                 })),
               });
             }
+            if (input.expense.ocrJobId && ocrDocumentId) {
+              const linked = await tx.document.updateMany({
+                where: { id: ocrDocumentId, expenseId: null },
+                data: { expenseId: expense.id },
+              });
+              if (linked.count !== 1) throw new Error('OCR_DOCUMENT_ALREADY_LINKED');
+              const confirmed = await tx.ocrJob.updateMany({
+                where: {
+                  id: input.expense.ocrJobId,
+                  status: OcrJobStatus.SUCCEEDED,
+                  confirmedAt: null,
+                },
+                data: { confirmedAt: new Date(), confirmedExpenseId: expense.id },
+              });
+              if (confirmed.count !== 1) throw new Error('OCR_ALREADY_CONFIRMED');
+            }
             const data = await tx.expense.findUniqueOrThrow({
               where: { id: expense.id },
               select: expenseDetail,
@@ -246,7 +369,11 @@ export class ExpensesRepository {
                 entityType: 'Expense',
                 entityId: expense.id,
                 requestId: input.requestId,
-                metadata: { groupId: input.groupId, totalCents: input.expense.totalCents },
+                metadata: {
+                  groupId: input.groupId,
+                  totalCents: input.expense.totalCents,
+                  ...(input.expense.ocrJobId ? { ocrJobId: input.expense.ocrJobId } : {}),
+                },
               },
             });
             return { data, replayed: false, requestHash: input.requestHash };

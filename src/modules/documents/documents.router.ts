@@ -1,43 +1,102 @@
 import express, { Router, type RequestHandler } from 'express';
+import { pipeline } from 'node:stream/promises';
 import type { DocumentAccessLevel } from '@prisma/client';
 import { sendData } from '../../http/response.js';
 import { AppError } from '../../shared/errors.js';
 import { uuidParam, validateBody, validateQuery } from '../../shared/validation.js';
+import { ALLOWED_DOCUMENT_TYPES } from '../../infrastructure/storage.js';
+import type { DocumentLockService } from './document-lock.service.js';
 import {
-  ALLOWED_DOCUMENT_TYPES,
-  type LocalFileStorageProvider,
-} from '../../infrastructure/storage.js';
-import {
+  documentLockPinSchema,
+  documentLockRemoveSchema,
+  documentLockSettingsSchema,
   grantSchema,
   listDocumentsQuerySchema,
+  sharedLinkSchema,
   updateDocumentSchema,
   uploadQuerySchema,
+  webAuthnResponseSchema,
   type ListDocumentsQuery,
   type UpdateDocumentInput,
   type UploadQuery,
 } from './documents.schema.js';
 import { contentDisposition, type DocumentsService } from './documents.service.js';
 
-/** Biblioteca de documentos; la subida recibe el binario crudo con su Content-Type. */
+type Limit = RequestHandler;
+
+/** Rutas privadas de la biblioteca y del bloqueo de Docs. */
 export function createDocumentsRouter(
   service: DocumentsService,
   options: {
     maxBytes: number;
-    uploadLimit?: RequestHandler;
-    downloadUrlLimit?: RequestHandler;
+    uploadLimit?: Limit;
+    downloadUrlLimit?: Limit;
+    pinLimit?: Limit;
+    lock?: DocumentLockService;
   },
 ): Router {
   const router = Router();
   const raw = express.raw({ type: Object.keys(ALLOWED_DOCUMENT_TYPES), limit: options.maxBytes });
-  const uploadLimit: RequestHandler = options.uploadLimit ?? ((_req, _res, next) => next());
-  const downloadUrlLimit: RequestHandler =
-    options.downloadUrlLimit ?? ((_req, _res, next) => next());
+  const uploadLimit = options.uploadLimit ?? ((_req, _res, next) => next());
+  const downloadUrlLimit = options.downloadUrlLimit ?? ((_req, _res, next) => next());
+  const pinLimit = options.pinLimit ?? ((_req, _res, next) => next());
+
+  if (options.lock) {
+    router.get('/lock/status', async (req, res) =>
+      sendData(res, await options.lock!.status(req.auth!.userId, req.auth!.sessionId)),
+    );
+    router.put('/lock', pinLimit, validateBody(documentLockSettingsSchema), async (req, res) => {
+      sendData(res, await options.lock!.configure(req.auth!.userId, req.body));
+    });
+    router.delete('/lock', pinLimit, validateBody(documentLockRemoveSchema), async (req, res) => {
+      sendData(res, await options.lock!.remove(req.auth!.userId, req.body.password));
+    });
+    router.post('/lock/pin', pinLimit, validateBody(documentLockPinSchema), async (req, res) => {
+      sendData(
+        res,
+        await options.lock!.unlockPin(req.auth!.userId, req.auth!.sessionId, req.body.pin),
+      );
+    });
+    router.post(
+      '/lock/webauthn/registration-options',
+      pinLimit,
+      validateBody(documentLockRemoveSchema),
+      async (req, res) => {
+        sendData(res, await options.lock!.registrationOptions(req.auth!.userId, req.body.password));
+      },
+    );
+    router.post(
+      '/lock/webauthn/registration-verify',
+      pinLimit,
+      validateBody(webAuthnResponseSchema),
+      async (req, res) => {
+        sendData(res, await options.lock!.verifyRegistration(req.auth!.userId, req.body));
+      },
+    );
+    router.post('/lock/webauthn/authentication-options', pinLimit, async (req, res) => {
+      sendData(res, await options.lock!.authenticationOptions(req.auth!.userId));
+    });
+    router.post(
+      '/lock/webauthn/authentication-verify',
+      pinLimit,
+      validateBody(webAuthnResponseSchema),
+      async (req, res) => {
+        sendData(
+          res,
+          await options.lock!.verifyAuthentication(req.auth!.userId, req.auth!.sessionId, req.body),
+        );
+      },
+    );
+    router.use(async (req, _res, next) => {
+      await options.lock!.requireUnlocked(req.auth!.userId, req.auth!.sessionId);
+      next();
+    });
+  }
 
   router.post('/', uploadLimit, validateQuery(uploadQuerySchema), raw, async (req, res) => {
     const mimeType = (req.header('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
-    if (!ALLOWED_DOCUMENT_TYPES[mimeType]) {
+    if (!ALLOWED_DOCUMENT_TYPES[mimeType])
       throw new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Solo se admiten PDF, JPEG, PNG o WebP');
-    }
     sendData(
       res,
       await service.upload(
@@ -72,6 +131,26 @@ export function createDocumentsRouter(
     await service.remove(req.auth!.userId, uuidParam(req.params['documentId']), req.requestId);
     sendData(res, { deleted: true });
   });
+  router.get('/:documentId/download', downloadUrlLimit, async (req, res) => {
+    const result = await service.downloadStream(
+      req.auth!.userId,
+      uuidParam(req.params['documentId']),
+      req.requestId,
+    );
+    res.setHeader('Content-Type', result.document.mimeType);
+    res.setHeader('Content-Length', String(result.document.sizeBytes));
+    res.setHeader('Content-Disposition', contentDisposition(result.document.name));
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    try {
+      await pipeline(result.stream, res);
+    } catch (error) {
+      if (!res.headersSent) throw error;
+      res.destroy();
+    }
+  });
+  // Compatibilidad: la URL devuelta apunta a la API autenticada, nunca a S3.
   router.post('/:documentId/download-url', downloadUrlLimit, async (req, res) => {
     sendData(
       res,
@@ -81,6 +160,12 @@ export function createDocumentsRouter(
         req.requestId,
       ),
     );
+  });
+  router.post('/:documentId/pin', async (req, res) => {
+    sendData(res, await service.pin(req.auth!.userId, uuidParam(req.params['documentId'])));
+  });
+  router.delete('/:documentId/pin', async (req, res) => {
+    sendData(res, await service.unpin(req.auth!.userId, uuidParam(req.params['documentId'])));
   });
   router.get('/:documentId/grants', async (req, res) => {
     sendData(res, await service.listGrants(req.auth!.userId, uuidParam(req.params['documentId'])));
@@ -93,6 +178,7 @@ export function createDocumentsRouter(
         uuidParam(req.params['documentId']),
         uuidParam(req.params['userId']),
         req.body.access as DocumentAccessLevel,
+        req.body.expiresAt ? new Date(req.body.expiresAt) : req.body.expiresAt,
         req.requestId,
       ),
     );
@@ -106,30 +192,32 @@ export function createDocumentsRouter(
     );
     sendData(res, { deleted: true });
   });
+  router.get('/:documentId/shared-links', async (req, res) => {
+    sendData(res, await service.sharedLinks(req.auth!.userId, uuidParam(req.params['documentId'])));
+  });
+  router.post('/:documentId/shared-links', validateBody(sharedLinkSchema), async (req, res) => {
+    sendData(
+      res,
+      await service.createSharedLink(
+        req.auth!.userId,
+        uuidParam(req.params['documentId']),
+        req.body,
+      ),
+      201,
+    );
+  });
+  router.post('/:documentId/shared-links/:linkId/revoke', async (req, res) => {
+    sendData(
+      res,
+      await service.revokeSharedLink(
+        req.auth!.userId,
+        uuidParam(req.params['documentId']),
+        uuidParam(req.params['linkId']),
+      ),
+    );
+  });
   router.get('/:documentId/access-logs', async (req, res) => {
     sendData(res, await service.logs(req.auth!.userId, uuidParam(req.params['documentId'])));
-  });
-  return router;
-}
-
-/** Descarga pública por capacidad: la URL firmada y de corta vida es la autorización. */
-export function createLocalStorageRouter(
-  storage: LocalFileStorageProvider,
-  service: DocumentsService,
-): Router {
-  const router = Router();
-  router.get('/local/:token', async (req, res) => {
-    const claims = storage.verify(String(req.params['token'] ?? ''));
-    if (!claims)
-      throw new AppError(403, 'SIGNED_URL_INVALID', 'El enlace de descarga no es valido o expiro');
-    const bytes = await service.readBytes(claims.key);
-    res.setHeader('Content-Type', claims.mimeType);
-    res.setHeader('Content-Length', String(bytes.length));
-    res.setHeader('Content-Disposition', contentDisposition(claims.fileName));
-    res.setHeader('Cache-Control', 'private, no-store');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
-    res.status(200).end(bytes);
   });
   return router;
 }

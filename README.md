@@ -1,6 +1,35 @@
 # Cabales API
 
+## P9: inicio de sesion con Google
+
+Google se integra como OpenID Connect mediante authorization code + PKCE. El proveedor permanece deshabilitado si `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI` no estan configurados juntos. `GET /api/v1/auth/config` expone unicamente `{ googleEnabled }` para que la PWA decida si muestra el boton.
+
+Para crear el cliente en Google Cloud:
+
+1. En Google Cloud Console crea o selecciona un proyecto, configura la pantalla de consentimiento OAuth y publica los scopes `openid`, `email` y `profile` segun el estado del proyecto.
+2. En **APIs y servicios > Credenciales**, crea un **ID de cliente OAuth** de tipo **Aplicacion web**.
+3. En **URIs de redireccion autorizados** registra exactamente `http://localhost:3000/api/v1/auth/google/callback` para desarrollo. En produccion registra el URI HTTPS publico exacto de la API, por ejemplo `https://api.example.com/api/v1/auth/google/callback`; no uses comodines ni el URI de la PWA.
+4. Copia el ID y el secreto unicamente al entorno del servidor: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI`. Nunca los pongas en la PWA, en git ni en logs.
+
+El callback valida `state`, `nonce`, PKCE, la firma RS256 con las claves publicas actuales de Google y los claims `aud`, `iss`, `exp` y `email_verified`. Los estados OIDC se consumen una sola vez; sus valores sensibles solo se guardan como hashes en PostgreSQL y el verifier viaja en una cookie HttpOnly temporal. Un correo de Google no verificado nunca crea ni vincula una cuenta. El acceso autenticado puede vincular o desvincular Google desde Cuenta; la API rechaza desvincular el ultimo metodo de acceso.
+
+## P3: eventos, RSVP y recordatorios
+
+Los eventos admiten edición parcial (`PATCH /groups/:groupId/events/:eventId`) de nombre, descripción, inicio/fin, ubicación, Maps HTTPS, zona horaria y enlaces. La fecha final debe ser igual o posterior al inicio. La persona creadora o `OWNER`/`ADMIN` puede editar, cancelar y configurar recordatorios; eliminar solo es posible cuando no existen gastos ni liquidación y devuelve `409 EVENT_HAS_FINANCIAL_ACTIVITY` en caso contrario.
+
+Cada miembro participante responde únicamente por sí mismo en `PUT .../rsvp` con `PENDING|GOING|MAYBE|DECLINED`. El detalle devuelve `respondedAt`, participantes agrupables por estado y `rsvpCounts`; el ID de participante nunca se acepta como identidad del actor.
+
+`PUT .../reminders` reemplaza hasta cinco intervalos en minutos. El planificador de `src/infrastructure/scheduler.ts` ejecuta `event-reminders`, usa `SET NX` con expiración cuando Redis está activo y `pg_try_advisory_xact_lock` como fallback. `ScheduledJobRun` conserva la clave de ventana, intentos y resultado; las notificaciones usan `event.reminder` y `dedupeKey`, incluyendo un marcador archivado cuando in-app está desactivado para evitar duplicar correo o push. `SCHEDULER_ENABLED=false` lo desactiva; en desarrollo el valor por defecto es `true`. En producción debe permanecer `true` al menos en una instancia y `RATE_LIMIT_STORE=redis` comparte el lock entre instancias.
+
 API REST de Cabales para registrar grupos y eventos, dividir gastos manuales en centavos, producir liquidaciones verificables y operar fondos, presupuestos, documentos, OCR asistido, Cabudas, estadísticas, avisos, logros y derechos de privacidad. Es un monolito modular en Express, TypeScript, Prisma 7 y PostgreSQL.
+
+Las suites de integración que usan `TEST_DATABASE_URL` se ejecutan sin paralelismo entre archivos: cada suite limpia la misma base antes de preparar sus datos y el orden paralelo produciría sesiones inválidas y resultados cruzados.
+
+## P2: reparto porcentual e importes adicionales
+
+Los gastos admiten `EQUAL`, `EXACT` y `PERCENT`. En `PERCENT`, cada participante envía `percentageBps` y la suma debe ser exactamente `10000`; el servicio calcula el subtotal con restos mayores. `subtotalCents` es la base y `totalCents` debe ser exactamente `subtotalCents + taxCents + tipCents`. Impuesto y propina aceptan importe (`taxCents`/`tipCents`) o porcentaje (`taxPercentBps`/`tipPercentBps`) sobre el subtotal, no ambos. Los porcentajes se redondean al centavo más cercano con mitad hacia arriba (`floor((subtotalCents * bps + 5000) / 10000)`). Cada cargo se reparte proporcionalmente al subtotal de las personas, también cuando ese subtotal proviene de ítems, usando restos mayores.
+
+La migración `20261003130000_expense_breakdown_percent` agrega el enum `PERCENT`, los importes del gasto y el desglose por participante con default `0`, realiza un preflight y valida CHECK de no negativos y consistencia. La exportación estadística CSV añade `subtotalCents`, `taxCents` y `tipCents`.
 
 ## Arquitectura
 
@@ -34,6 +63,7 @@ El dominio de dinero y liquidación no importa Express ni Prisma. Los repositori
 1. Crear la configuración local a partir de `.env.example` y cambiar cualquier credencial compartida.
 2. Iniciar PostgreSQL con `docker compose up -d postgres` o usar una instancia aislada propia. `docker compose up --build api` levanta Express en el puerto 3000.
 3. Instalar exactamente el lockfile con `pnpm install --frozen-lockfile`.
+   El bloque `allowBuilds` de `pnpm-workspace.yaml` autoriza los scripts de instalación necesarios de Prisma, `argon2`, `esbuild` y `tesseract.js`.
 4. Aplicar las migraciones versionadas con `pnpm db:migrate` (recomendado también en desarrollo). `pnpm db:push` solo sirve para prototipos desechables.
 5. Insertar catálogos públicos con `pnpm db:seed`.
 6. Iniciar desarrollo con `pnpm dev`.
@@ -112,13 +142,17 @@ pnpm exec prisma migrate diff --from-config-datasource --to-schema prisma/schema
 - `CORS_ORIGINS`: allowlist exacta separada por comas (`http://localhost:5173` y `http://127.0.0.1:5173` por defecto); nunca se usa comodín con credenciales.
 - `SESSION_TTL_HOURS`: vigencia de la sesión, por defecto 168 horas.
 - `COOKIE_NAME`: nombre de la cookie HttpOnly.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI`: cliente OIDC opcional; deben existir juntos para habilitar Google. El redirect local es `http://localhost:3000/api/v1/auth/google/callback` y en produccion debe ser el URI HTTPS exacto registrado en Google Cloud.
 - `RATE_LIMIT_STORE` (`memory`|`redis`) y `REDIS_URL`: store de límites; producción exige Redis compartido y el arranque falla sin él. Si Redis cae, los límites sensibles fallan cerrados (503) y el global deja pasar.
-- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario) y `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario).
-- `APP_ORIGIN` y `PUBLIC_API_ORIGIN`: bases de enlaces de correo y de URLs firmadas.
+- `RATE_LIMIT_WINDOW_MINUTES`, `RATE_LIMIT_MAX` (global por IP), `AUTH_RATE_LIMIT_MAX` (login/registro por IP y por hash de correo), `RECOVERY_RATE_LIMIT_MAX` (verificación y recuperación por IP y correo), `INVITATION_RATE_LIMIT_MAX`, `UPLOAD_RATE_LIMIT_MAX`, `SHARED_LINK_RATE_LIMIT_MAX`, `DOCUMENT_PIN_RATE_LIMIT_MAX`, `OCR_RATE_LIMIT_MAX`, `EXPENSE_RATE_LIMIT_MAX`, `EVENT_RSVP_RATE_LIMIT_MAX`, `PRIVACY_RATE_LIMIT_MAX`, `PUSH_SUBSCRIPTION_RATE_LIMIT_MAX` (POST/DELETE de suscripciones push por usuario), `STATISTICS_EXPORT_RATE_LIMIT_MAX` (por usuario) e `INCOME_RATE_LIMIT_MAX` (operaciones de ingresos personales por usuario).
+- `SCHEDULER_ENABLED`, `SCHEDULER_INTERVAL_SECONDS`, `SCHEDULER_LOCK_TTL_SECONDS` y `SCHEDULER_MAX_ATTEMPTS`: habilitación, frecuencia, TTL del lock y reintentos acotados del planificador. En producción no se debe desactivar el job de recordatorios.
+- `APP_ORIGIN` y `PUBLIC_API_ORIGIN`: bases de enlaces de correo y del endpoint autenticado de descargas.
 - `EMAIL_VERIFICATION_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`, `INVITATION_TTL_DAYS`: vigencia de enlaces de un solo uso.
 - `EMAIL_PROVIDER` (`logging`|`http`), `EMAIL_FROM`, `EMAIL_HTTP_URL`, `EMAIL_HTTP_API_KEY`: correo transaccional; `logging` no envía ni registra contenido.
-- `STORAGE_PROVIDER` (`local`|`s3`), `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET` (≥32 caracteres en producción local), `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `SIGNED_URL_TTL_SECONDS`, `MAX_UPLOAD_BYTES`. S3 funciona con MinIO y nunca devuelve URLs permanentes.
-- `OCR_PROVIDER` (`disabled`|`local`|`http`), `OCR_HTTP_URL`, `OCR_HTTP_API_KEY`, `OCR_MAX_ATTEMPTS`; `local` es determinista y solo para desarrollo/pruebas, y falla en producción. `PUSH_PROVIDER` (`disabled`|`webpush`), `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`; la privada solo existe en el entorno del servidor.
+- `STORAGE_PROVIDER` (`local`|`s3`), `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET` (≥32 caracteres en producción local), `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`, `S3_SSE` (`AES256`|`aws:kms`), `S3_SSE_KMS_KEY_ID`, `SIGNED_URL_TTL_SECONDS`, `MAX_UPLOAD_BYTES`. Docs no entrega URLs directas de S3.
+- `DOCUMENT_ENCRYPTION_KEYS` (anillo `id:base64_de_32_bytes` separado por comas), `DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID` y `DOCUMENT_ENCRYPTION_MIGRATE_LEGACY`; el anillo es obligatorio en producción y sus valores solo viven en el entorno.
+- `DOCUMENT_LOCK_UNLOCK_MINUTES`, `DOCUMENT_LOCK_PIN_MAX_ATTEMPTS`, `DOCUMENT_LOCK_PIN_LOCK_MINUTES`, `WEBAUTHN_RP_ID` y `WEBAUTHN_ORIGIN`: duración, límites y configuración de passkeys del bloqueo de Docs.
+- `OCR_PROVIDER` (`disabled`|`local`|`http`|`tesseract`), `OCR_HTTP_URL`, `OCR_HTTP_API_KEY`, `OCR_TESSERACT_LANGS` (por defecto `spa+eng`), `OCR_TESSERACT_LANG_PATH` y `OCR_MAX_ATTEMPTS`; `tesseract` es OCR real local para imágenes y rechaza PDF, mientras `local` es determinista solo para desarrollo/pruebas y falla en producción. `PUSH_PROVIDER` (`disabled`|`webpush`), `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`; la privada solo existe en el entorno del servidor.
 - `STATISTICS_EXPORT_MAX_ROWS` y `STATISTICS_EXPORT_RATE_LIMIT_MAX`: límite de filas y solicitudes de la exportación CSV.
 - `PRIVACY_EXPORT_TTL_DAYS` y `RETENTION_*_DAYS`: plazos provisionales de exportación y retención; deben confirmarse legalmente.
 - `TRUST_PROXY`: número exacto de proxies confiables delante de Express; `0` por defecto.
@@ -153,13 +187,13 @@ Toda respuesta usa el sobre `{ "success": true, "data": ..., "meta": ... }` o `{
 Endpoints públicos:
 
 - `GET /health`, `GET /ready`
-- `POST /api/v1/auth/register`, `POST /api/v1/auth/login`
+- `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `GET /api/v1/auth/config`, `GET /api/v1/auth/google/start` y `GET /api/v1/auth/google/callback`
 - `POST /api/v1/auth/email-verification/{request,resend,confirm}` y `POST /api/v1/auth/password-recovery/{request,resend,confirm}`: request/resend responden 202 idéntico exista o no la cuenta.
-- `GET /api/v1/storage/local/:token`: descarga con URL firmada de corta duración.
+- `GET /api/v1/share/documents/:token`: vista pública mínima de un enlace de solo lectura; la descarga siempre pasa por la API.
 
 Endpoints autenticados:
 
-- `POST /api/v1/auth/logout`, `GET|PATCH /api/v1/auth/me`
+- `POST /api/v1/auth/logout`, `GET|PATCH /api/v1/auth/me`, `GET /api/v1/auth/methods`, `POST /api/v1/auth/google/link/start`, `DELETE /api/v1/auth/google`
 - `POST|GET /api/v1/groups`
 - `GET|PATCH|DELETE /api/v1/groups/:groupId`
 - `GET|POST /api/v1/groups/:groupId/invitations`, `POST .../invitations/:invitationId/{resend,revoke}`
@@ -167,6 +201,7 @@ Endpoints autenticados:
 - `GET|POST /api/v1/groups/:groupId/categories`, `DELETE .../categories/:categoryId`
 - `POST|GET /api/v1/groups/:groupId/events`
 - `GET /api/v1/groups/:groupId/events/:eventId`
+- `PATCH|DELETE /api/v1/groups/:groupId/events/:eventId`, `POST .../:eventId/cancel`, `PUT .../:eventId/rsvp` y `PUT .../:eventId/reminders`
 - `POST|GET /api/v1/groups/:groupId/expenses`
 - `GET /api/v1/groups/:groupId/expenses/:expenseId`
 - `POST|GET /api/v1/groups/:groupId/settlements`
@@ -176,7 +211,7 @@ Endpoints autenticados:
 - Presupuestos: `/api/v1/groups/:groupId/budgets` (progreso del periodo, historial y alertas).
 - Documentos: `/api/v1/documents` (subida binaria validada por firma, permisos, URL firmada, bitácora).
 - OCR: `/api/v1/ocr/jobs` (asíncrono; solo propone y exige confirmación humana).
-- Cabudas: `/api/v1/cabudas/{summary,history}`; Estadísticas: `/api/v1/statistics/summary` y `/api/v1/statistics/summary/export` (CSV acotado, moneda explícita, escape de fórmulas y rate limit).
+- Cabudas: `/api/v1/cabudas/{summary,history}`; Estadísticas: `/api/v1/statistics/summary`, `/api/v1/statistics/summary/export` (CSV) y `/api/v1/statistics/summary/export/pdf` (informe PDF generado en servidor); Ingresos personales: `/api/v1/incomes`.
 - Avisos: `/api/v1/notifications` (lista, contador, lectura, archivo, preferencias, `push-config` y suscripciones push).
 - Logros: `/api/v1/achievements` y `/history`.
 - Privacidad: `/api/v1/privacy/requests` (ARCO-POL, confirmación, cancelación, exportación JSON).
@@ -204,7 +239,7 @@ Prisma no genera restricciones `CHECK`. Los servicios MVP verifican positividad,
 
 - Contraseñas con Argon2id y salt administrado por la biblioteca.
 - Tokens de sesión, invitación, verificación y recuperación aleatorios; PostgreSQL conserva solo SHA-256. Los enlaces de correo llevan el token en el fragmento `#token=` para que no llegue a logs ni Referer. Recuperar contraseña revoca todas las sesiones.
-- Documentos: tipo permitido validado contra la firma binaria, nombre saneado, clave opaca nunca expuesta, descarga con `Content-Disposition: attachment`, `nosniff` y CSP `sandbox`. Sin acceso se responde 404 para no revelar existencia.
+- Documentos: tipo permitido validado contra la firma binaria, nombre saneado, clave opaca nunca expuesta, AES-256-GCM opcional en desarrollo y obligatorio en producción, descarga autorizada/descifrada por la API con `Content-Disposition: attachment`, `nosniff` y CSP `sandbox`. Sin acceso se responde 404 para no revelar existencia.
 - Exportación de privacidad sin secretos, IP, user-agent ni datos personales de terceros. La supresión exige contraseña, anonimiza y conserva la integridad financiera de los demás.
 - Sesiones expirables y revocables en cookie `HttpOnly`, `SameSite=Lax` y `Secure` en producción.
 - Token CSRF por sesión en cabecera y cookie separada, comparado en tiempo constante.
@@ -221,6 +256,26 @@ Prisma no genera restricciones `CHECK`. Los servicios MVP verifican positividad,
 El schema incluye `User`, `Account`, `Session`, `Group`, `GroupMember`, `GroupInvitation`, `Event`, `EventParticipant`, `EventLink`, `Expense`, `ExpenseParticipant`, `ExpensePayer`, `ExpenseItem`, `ExpenseItemAllocation`, `Receipt`, `OcrJob`, `Settlement`, `SettlementTransfer`, `TransferStatusHistory`, `Fund`, `FundMember`, `FundMovement`, `Category`, `Tag`, `ExpenseTag`, `Budget`, `RecurringExpense`, `Document`, `DocumentAccessGrant`, `DocumentAccessLog`, `PushSubscription`, `Notification`, `Achievement`, `UserAchievement`, `IdempotencyKey` y `AuditLog`.
 
 Balances, saldos de fondos, consumo de presupuestos y estadísticas no se almacenan: se derivan de movimientos y gastos.
+
+## Decisiones P1: OCR y items
+
+Los errores de proveedor se exponen con el sobre uniforme `{ success: false, error }`; un proveedor no disponible responde `503 PROVIDER_UNAVAILABLE`, distinto de un fallo de red del cliente.
+
+`OCR_PROVIDER=tesseract` usa Tesseract.js local en produccion para JPEG, PNG y WebP. Los PDFs se rechazan con un error de formato explicito. `OCR_TESSERACT_LANGS` admite combinaciones de modelos oficiales como `spa+eng`; para modelos entrenados propios, `OCR_TESSERACT_LANG_PATH` habilita los códigos adicionales y apunta a la carpeta que contiene sus archivos `.traineddata`. Los modelos oficiales pueden descargarse desde `https://github.com/tesseract-ocr/tessdata_fast/tree/main`, para evitar depender de red. El proveedor `local` sigue siendo un doble determinista bloqueado en produccion.
+
+Descarga los modelos fuera del repositorio y configura la carpeta en el entorno del servidor:
+
+```powershell
+New-Item -ItemType Directory -Force .\tessdata | Out-Null
+Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/spa.traineddata -OutFile .\tessdata\spa.traineddata
+Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata -OutFile .\tessdata\eng.traineddata
+# OCR_TESSERACT_LANGS=spa+eng
+# OCR_TESSERACT_LANG_PATH=C:\ruta\a\tessdata
+```
+
+El parser de tickets es puro, no inventa campos y conserva `null` cuando no reconoce un valor. Crear un gasto con `ocrJobId` usa los datos editados por la persona, valida propiedad, estado, permisos y pertenencia documental, y confirma el OCR y enlace del documento dentro de la misma transaccion idempotente.
+
+Las estadísticas distinguen `spentCents` (total visible), `myShareCents` (suma de `shareCents` de participantes que pertenecen al usuario autenticado) y `myPaidCents` (suma de sus pagos). El flujo de integración de estadísticas crea dos gastos con Ana como única participante, por lo que ambas métricas personales suman 9,900 centavos.
 
 ## Verificación
 
@@ -242,11 +297,11 @@ pnpm format:check
 
 Para `prisma validate` basta una URL PostgreSQL sintácticamente válida; no abre una conexión.
 
-La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contra PostgreSQL real, registro y verificación, invitaciones (duplicado, reenvío, revocación, vista previa, aceptación), categorías, presupuesto con alerta, gasto, Cabudas antes y después del cierre, pago, estadísticas, fondos (idempotencia, permisos, retiros concurrentes sin saldo negativo), documentos (firma binaria, permisos, URL firmada), OCR con confirmación, logros, avisos, exportación y supresión de privacidad, recuperación de contraseña y retención; y con Redis, límites compartidos entre dos instancias.
+La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contra PostgreSQL real, registro y verificación, invitaciones (duplicado, reenvío, revocación, vista previa, aceptación), categorías, presupuesto con alerta, gasto, Cabudas antes y después del cierre, pago, estadísticas, fondos (idempotencia, permisos, retiros concurrentes sin saldo negativo), Docs P5 (cifrado, descifrado por API, tag manipulado, fijados, enlaces caducables/revocables/limitados y bloqueo), OCR con confirmación, logros, avisos, exportación y supresión de privacidad, recuperación de contraseña y retención; y con Redis, límites compartidos entre dos instancias.
 
 ## Límites actuales
 
-- Gastos recurrentes, etiquetas y enlaces de evento siguen modelados sin endpoints.
+- Gastos recurrentes y etiquetas siguen modelados sin endpoints; los enlaces de evento se gestionan dentro de la ediciÃ³n P3.
 - Proveedores reales pendientes de decisión: correo (`http` compatible con Resend; SMTP no implementado). S3 compatible y Web Push/VAPID ya están disponibles por configuración; OCR `local` sigue reservado a desarrollo/pruebas.
 - Los plazos `RETENTION_*_DAYS` y `PRIVACY_EXPORT_TTL_DAYS` son provisionales hasta validación legal. Rectificación y oposición quedan `IN_PROGRESS` para atención manual.
 - No hay edición ni borrado de gastos financieros; al cerrar el evento quedan inmutables por diseño.
@@ -258,6 +313,62 @@ La suite unitaria y HTTP no requiere servicios. `tests/integration` cubre, contr
 - `pnpm-lock.yaml` es el único lockfile canónico; `package-lock.json` se eliminó para no mantener dos árboles de dependencias divergentes. Se excluyen `node_modules`, `dist`, cobertura y Prisma Client generado.
 - Las migraciones versionadas viven en `prisma/migrations`; `pnpm db:migrate` aplica únicamente las migraciones existentes y no cambia el esquema automáticamente al arrancar.
 
+## Decisiones P3
+
+- La migración `20261003150000_events_rsvp_reminders_scheduler` es aditiva: campos opcionales, defaults para RSVP, preflight y CHECK `NOT VALID`/`VALIDATE CONSTRAINT`; añade `EventReminder` y `ScheduledJobRun` con índices únicos y de ejecución.
+- `NotificationsService` conserva la deduplicación por usuario y `dedupeKey` incluso cuando la preferencia in-app está apagada: crea un registro archivado como marcador antes de correo o push.
+- Los adaptadores locales siguen sin datos ficticios y no se usan para recordatorios; el planificador consulta solo PostgreSQL y los canales configurados.
+
+## P4: gastos personales, recurrentes, etiquetas e historial
+
+Las categorias personales se sirven en `GET|POST /categories` y se pueden editar o eliminar solo por su propietario. Las etiquetas admiten tambien `PATCH` dentro de su alcance. Los gastos personales quedan fuera de grupos, liquidaciones, cabudas y estadisticas grupales; el borrado ARCO y la exportacion incluyen sus datos propios.
+
+La migración `20261004010000_p4_gastos_personales_recurrentes_etiquetas` permite gastos sin grupo ni evento, siempre ligados a `ownerUserId`. Las rutas personales son `GET|POST /expenses`, `GET|PATCH|DELETE /expenses/:expenseId`, `GET|POST /tags` y `GET|POST /recurring-expenses`; las rutas grupales añadidas son `/groups/:groupId/tags` y `/groups/:groupId/recurring-expenses`. El historial acepta `month`, `from`, `to`, `categoryId`, `tagId`, `groupId`, `text`, `scope`, `cursor` y `limit`, y devuelve la suma filtrada en `meta.total`.
+
+El job `recurring-expenses` reutiliza el planificador P3. Cada ejecución usa una clave de periodo única en `Expense`, bloquea el recurrente y pausa con notificación si el evento grupal está cerrado o la plantilla dejó de ser válida. No hay variables de entorno nuevas.
+## P5: Docs seguro
+
+Docs admite las categorías fijas `IDENTIDAD`, `VIAJE`, `SEGURO`, `VEHICULO`, `SALUD`, `HOGAR`, `FINANZAS` y `OTRO`, filtros, fijados, recientes y `expiresAt` con avisos por defecto a 30 y 7 días. El job `document-expiry-notifications` emite `document.expiring`/`document.expired` con claves idempotentes.
+
+Las concesiones pueden caducar y los enlaces de solo lectura tienen token aleatorio almacenado solo como hash, máximo 30 días, límite de accesos, revocación, rate limit y bitácora. La página pública solo presenta el nombre y la descarga.
+
+Las subidas nuevas usan AES-256-GCM con sobre por documento cuando existe el anillo `DOCUMENT_ENCRYPTION_KEYS`; en producción es obligatorio. `DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID` selecciona la clave activa. `S3_SSE=AES256` o `aws:kms` añade cifrado del proveedor. `GET /documents/:documentId/download` y los enlaces públicos descifran en streaming tras autorizar; `pnpm docs:rotate-keys` reenvuelve las claves de datos y puede migrar legacy con `DOCUMENT_ENCRYPTION_MIGRATE_LEGACY=true`.
+
+El bloqueo de Docs usa PIN Argon2id y/o WebAuthn, ligado a la sesión por `documentsUnlockedAt`; el desbloqueo se pierde al cerrar sesión. `WEBAUTHN_RP_ID` y `WEBAUTHN_ORIGIN` se derivan de `APP_ORIGIN` si no se configuran.
+
+## P8: compartir y colaboración
+
+La migración `20261004080000_p8_colaboracion` añade enlaces de resumen público para eventos o liquidaciones, con token aleatorio de 256 bits almacenado únicamente como SHA-256, caducidad de 1 a 30 días, revocación y límite por IP. `GET /api/v1/share/summaries/:token` devuelve solo nombres visibles, totales y transferencias; nunca devuelve correos, hashes ni el token.
+
+Los eventos disponen de plantillas de repetición, hilo de comentarios de texto plano (`GET|POST|PATCH|DELETE .../comments`), asociación con varios fondos y saldos/aportes derivados. Los comentarios se limitan a 2.000 caracteres, rechazan HTML, exigen pertenencia al grupo y notifican a participantes registrados respetando sus preferencias. OWNER/ADMIN modera comentarios ajenos.
+
+Los fondos tienen políticas `ANY_MEMBER`, `MANAGERS` o `GROUP_ADMINS` para aportar, retirar y cerrar, además de `withdrawalLimitCents`; cada decisión se vuelve a comprobar en el servidor y los valores por defecto conservan las reglas anteriores. La asociación evento-fondo valida pertenencia al mismo grupo y moneda.
+
+`GET /api/v1/calendar/events` entrega el rango de eventos de los grupos de la persona autenticada, limitado a 93 días. El cliente muestra calendario mensual y agenda, y las invitaciones generan el QR localmente con `qrcode`; el token continúa en el fragmento `#token=` y el PNG se descarga sin servicios externos.
+
+No hay variables de entorno nuevas en P8. La verificación específica debe ejecutar las pruebas unitarias y de integración con PostgreSQL/Redis reales, además de las pruebas de app y E2E; esta rama no ejecuta `tsc`, Vitest, Vite build, Prisma generate ni Playwright por la restricción del sandbox.
+
+## P6: aportes y logros sociales
+
+La migracion `20261004060000_p6_aportes_logros` añade solicitudes de aporte por integrante (`PENDING|PAID|OVERDUE`), fecha limite y enlace idempotente con el movimiento que las paga. `POST /groups/:groupId/funds/:fundId/contribution-requests` requiere gestor del fondo; el aporte puede indicar `contributionRequestMemberId` y el servicio comprueba que pertenece a la persona autenticada y que el importe coincide.
+
+El job `fund-contribution-reminders` usa una ventana de 24 horas para `fund.contribution_due`, marca pendientes vencidos y emite `fund.contribution_overdue`. Las claves por integrante y tipo pasan por la deduplicacion persistente de `Notification`, por lo que las preferencias in-app apagadas no provocan reenvios de correo o push. Los avisos de eventos y documentos existentes ya comparten el mismo camino de push y preferencia.
+
+El catalogo conserva los logros anteriores y añade Siempre paga, El mas puntual, Rey de las cabudas, Organizador profesional, Companero ejemplar y Solo por diversion. Cada uno expone umbrales Bronce/Plata/Oro y puntos 1/2/3; el progreso se calcula desde transferencias, fechas limite, RSVP, cierres, eventos sin gastos, aportes y movimientos persistidos. `GET /achievements` tambien sirve de perfil de insignias; `GET /groups/:groupId/achievements/ranking` y `/members` solo funcionan para integrantes del grupo. `GET|PUT /achievements/privacy` controla la visibilidad individual en el ranking.
+
+Los umbrales P6 son, en orden Bronce/Plata/Oro: Siempre paga 1/5/15, El mas puntual 1/5/15, Rey de las cabudas 1/5/15, Organizador profesional 1/3/10, Companero ejemplar 1/5/15 y Solo por diversion 1/3/10.
+
+Los agregados de logros se cachean 60 segundos por usuario para evitar consultas repetidas en rankings; el bus de eventos invalida la caché antes de recalcular actividad.
+
 ## Principios aplicados
 
+El contrato OpenAPI de P4 se comprueba contra todas las operaciones montadas, incluidos los routers personales separados y las acciones de pausa, reanudacion y borrado de recurrentes. No se documentan rutas personales que no esten montadas.
+
 Se aplican SRP y separación de validación, negocio y persistencia; zero trust en body, parámetros, cookies y cabeceras; mínimo privilegio RBAC; atomicidad y aislamiento serializable; request/correlation ID; fallos seguros y mensajes controlados; health/readiness separados; logs sin secretos; y algoritmos puros, deterministas y verificables para dinero y liquidación.
+# P7: estadísticas avanzadas, ingresos y proyección
+
+El resumen autenticado de `/api/v1/statistics/summary` calcula la variación absoluta y porcentual frente al periodo anterior equivalente, el desglose por categoría, las estadísticas de fondos visibles, el resumen de ingresos contra gastos y una proyección del mes actual. La proyección es explícitamente una estimación: divide el gasto real acumulado del mes entre los días transcurridos, lo extiende a los días restantes y suma una sola vez los `RecurringExpense` activos cuyo `nextRunAt` cae entre ahora y el inicio del próximo mes. No interpreta `frequency`, no ejecuta recurrentes y tolera el modelo existente sin cambios.
+
+Los ingresos son personales y no pertenecen a grupos ni documentos. Se almacenan en `Income` con importe, fecha, categoría, nota y moneda, y todas las consultas filtran por el usuario autenticado. El informe CSV existente se mantiene; `/api/v1/statistics/summary/export/pdf` genera un PDF de texto en el servidor sin navegador.
+
+La migración `20261004030000_p7_ingresos` es aditiva. La variable `INCOME_RATE_LIMIT_MAX` controla el límite por usuario de las operaciones de ingresos y tiene valor `60` por defecto.

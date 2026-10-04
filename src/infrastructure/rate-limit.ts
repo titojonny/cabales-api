@@ -26,6 +26,47 @@ export interface RedisLike {
   eval(script: string, numKeys: number, ...args: Array<string | number>): Promise<unknown>;
   decr(key: string): Promise<number>;
   del(key: string): Promise<number>;
+  set?(
+    key: string,
+    value: string,
+    mode: 'PX',
+    ttlMs: number,
+    condition: 'NX',
+  ): Promise<string | null>;
+}
+
+/** Ejecución exclusiva distribuida para trabajos periódicos. */
+export interface DistributedLock {
+  runExclusive<T>(
+    key: string,
+    ttlMs: number,
+    task: () => Promise<T>,
+  ): Promise<{ acquired: boolean; result?: T }>;
+}
+
+const RELEASE_LOCK_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`;
+
+/** Lock Redis SET NX con token opaco y liberación segura por propietario. */
+class RedisDistributedLock implements DistributedLock {
+  constructor(private readonly client: RedisLike) {}
+
+  async runExclusive<T>(key: string, ttlMs: number, task: () => Promise<T>) {
+    if (!this.client.set) throw new Error('REDIS_LOCK_UNAVAILABLE');
+    const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const lockKey = `cabales:scheduler:${key}`;
+    const acquired = (await this.client.set(lockKey, token, 'PX', ttlMs, 'NX')) === 'OK';
+    if (!acquired) return { acquired: false };
+    try {
+      return { acquired: true, result: await task() };
+    } finally {
+      await this.client.eval(RELEASE_LOCK_SCRIPT, 1, lockKey, token).catch(() => undefined);
+    }
+  }
 }
 
 /** Store distribuido de express-rate-limit sobre Redis; comparte contadores entre instancias. */
@@ -78,6 +119,7 @@ export class RedisRateLimitStore implements Store {
 export interface RateLimitStoreFactory {
   readonly kind: 'memory' | 'redis';
   create(prefix: string): Store | undefined;
+  readonly schedulerLock?: DistributedLock;
   close(): Promise<void>;
 }
 
@@ -104,6 +146,7 @@ export function createRateLimitStoreFactory(
   return {
     kind,
     create: (prefix) => new RedisRateLimitStore(redis, prefix),
+    ...(redis.set ? { schedulerLock: new RedisDistributedLock(redis) } : {}),
     close: async () => {
       if (redis instanceof Redis) await redis.quit().catch(() => undefined);
     },
@@ -141,7 +184,10 @@ export function createLimiter(options: {
     ...(store ? { store } : {}),
     skip: (req) => options.key === 'email' && !emailKey(req),
     keyGenerator: (req) => {
-      const endpoint = `${req.baseUrl}${req.path}`;
+      const endpoint = `${req.baseUrl}${req.path}`.replace(
+        /\/share\/(?:summaries|documents)\/[A-Za-z0-9_-]+$/,
+        (value) => `${value.split('/').slice(0, -1).join('/')}/:token`,
+      );
       if (options.key === 'user' && req.auth?.userId) return `u:${req.auth.userId}`;
       if (options.key === 'email') return `e:${endpoint}:${emailKey(req)}`;
       return `ip:${ipKeyGenerator(req.ip ?? '0.0.0.0')}`;

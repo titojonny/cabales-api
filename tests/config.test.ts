@@ -5,10 +5,13 @@ const base = { DATABASE_URL: 'postgresql://u:p@localhost:5432/db' };
 const production = {
   ...base,
   NODE_ENV: 'production',
+  APP_ORIGIN: 'https://app.cabales.com',
   CORS_ORIGINS: 'https://app.cabales.com',
   RATE_LIMIT_STORE: 'redis',
   REDIS_URL: 'redis://redis:6379',
   STORAGE_SIGNING_SECRET: 'x'.repeat(40),
+  DOCUMENT_ENCRYPTION_KEYS: `primary:${Buffer.alloc(32, 1).toString('base64')}`,
+  DOCUMENT_ENCRYPTION_ACTIVE_KEY_ID: 'primary',
 };
 
 describe('loadConfig', () => {
@@ -18,6 +21,7 @@ describe('loadConfig', () => {
     expect(config.EMAIL_PROVIDER).toBe('logging');
     expect(config.OCR_PROVIDER).toBe('disabled');
     expect(config.PUSH_SUBSCRIPTION_RATE_LIMIT_MAX).toBe(20);
+    expect(config.SCHEDULER_ENABLED).toBe(true);
     expect(config.retention.tokensMs).toBe(7 * 86_400_000);
   });
 
@@ -49,6 +53,18 @@ describe('loadConfig', () => {
     );
     expect(() => loadConfig({ ...base, PUSH_PROVIDER: 'webpush' })).toThrow(/VAPID_PUBLIC_KEY/);
     expect(() => loadConfig({ ...base, STORAGE_PROVIDER: 's3' })).toThrow(/S3_ENDPOINT/);
+  });
+
+  it('permite Tesseract real en produccion y valida sus idiomas', () => {
+    const config = loadConfig({
+      ...production,
+      OCR_PROVIDER: 'tesseract',
+      OCR_TESSERACT_LANGS: 'spa+eng',
+    });
+    expect(config.OCR_TESSERACT_LANGS).toBe('spa+eng');
+    expect(() =>
+      loadConfig({ ...base, OCR_PROVIDER: 'tesseract', OCR_TESSERACT_LANGS: 'spa+eng+bad' }),
+    ).toThrow();
   });
 
   it('limita la vida de URLs firmadas y exige HTTPS para VAPID en produccion', () => {

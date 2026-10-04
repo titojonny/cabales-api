@@ -3,6 +3,8 @@ allowBuilds:
   argon2: true
   esbuild: true
   prisma: true
+  # P4: el adaptador Tesseract requiere habilitar o deshabilitar este build script.
+  tesseract.js: true
 
 overrides:
   deepmerge-ts: ^8.0.2

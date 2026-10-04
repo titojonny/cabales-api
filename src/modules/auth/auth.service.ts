@@ -1,4 +1,5 @@
 import argon2 from 'argon2';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { hashToken, randomToken } from '../../shared/crypto.js';
 import { AppError, ensure } from '../../shared/errors.js';
 import type {
@@ -10,6 +11,7 @@ import type {
 import { AuthRepository } from './auth.repository.js';
 import { emailTemplates, type EmailProvider } from '../../infrastructure/email.js';
 import type { BackgroundTasks } from '../../infrastructure/background.js';
+import type { GoogleOAuthProvider } from '../../infrastructure/google-oauth.js';
 
 interface RequestAgent {
   userAgent?: string;
@@ -42,6 +44,21 @@ export interface SessionResult {
   user: PublicUser;
 }
 
+export type GoogleAuthIntent = 'login' | 'link';
+
+export interface GoogleStartResult {
+  authorizationUrl: string;
+  state: string;
+  nonce: string;
+  codeVerifier: string;
+}
+
+export interface GoogleCompleteResult {
+  intent: GoogleAuthIntent;
+  user: PublicUser;
+  session?: SessionResult;
+}
+
 /** Puerto consumido por HTTP para permitir pruebas sin PostgreSQL. */
 export interface AuthPort {
   register(input: RegisterInput, agent: RequestAgent): Promise<SessionResult>;
@@ -54,6 +71,19 @@ export interface AuthPort {
   resetPassword(input: PasswordResetInput, requestId: string): Promise<void>;
   updateProfile(userId: string, input: UpdateProfileInput, requestId: string): Promise<PublicUser>;
   verifyPassword(userId: string, password: string): Promise<boolean>;
+  googleEnabled?(): boolean;
+  beginGoogleAuth?(intent: GoogleAuthIntent, userId?: string): Promise<GoogleStartResult>;
+  completeGoogleAuth?(input: {
+    state: string;
+    nonce: string;
+    code: string;
+    codeVerifier: string;
+    agent: RequestAgent;
+  }): Promise<GoogleCompleteResult>;
+  authMethods?(
+    userId: string,
+  ): Promise<{ providers: Array<'PASSWORD' | 'GOOGLE'>; hasPassword: boolean }>;
+  unlinkGoogle?(userId: string): Promise<void>;
 }
 
 /** Tiempos de vida y origen usados para construir enlaces. */
@@ -61,6 +91,7 @@ export interface AuthSettings {
   sessionTtlMs: number;
   emailVerificationTtlMs: number;
   passwordResetTtlMs: number;
+  googleStateTtlMs?: number;
   appOrigin: string;
   /** Intervalo mínimo entre correos del mismo tipo al mismo usuario. */
   resendCooldownMs?: number;
@@ -77,6 +108,7 @@ export class AuthService implements AuthPort {
     private readonly settings: AuthSettings,
     private readonly emailProvider: EmailProvider,
     private readonly background: BackgroundTasks,
+    private readonly googleProvider?: GoogleOAuthProvider,
   ) {
     this.cooldownMs = settings.resendCooldownMs ?? 60_000;
   }
@@ -161,6 +193,108 @@ export class AuthService implements AuthPort {
     ensure(valid, 401, 'INVALID_CREDENTIALS', 'Credenciales invalidas');
     const { isActive: _isActive, emailVerifiedAt, ...rest } = account.user;
     return this.issueSession({ ...rest, emailVerified: emailVerifiedAt !== null }, agent);
+  }
+
+  googleEnabled(): boolean {
+    return this.googleProvider !== undefined;
+  }
+
+  async beginGoogleAuth(intent: GoogleAuthIntent, userId?: string): Promise<GoogleStartResult> {
+    ensure(this.googleProvider, 404, 'GOOGLE_DISABLED', 'El inicio con Google no esta habilitado');
+    if (intent === 'link') ensure(userId, 401, 'AUTH_REQUIRED', 'Autenticacion requerida');
+    const state = randomToken();
+    const nonce = randomToken();
+    const codeVerifier = randomToken();
+    const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+    await this.repository.createOAuthState({
+      stateHash: hashToken(state),
+      nonceHash: hashToken(nonce),
+      intent,
+      ...(userId ? { userId } : {}),
+      expiresAt: new Date(Date.now() + (this.settings.googleStateTtlMs ?? 10 * 60_000)),
+    });
+    return {
+      state,
+      nonce,
+      codeVerifier,
+      authorizationUrl: this.googleProvider.authorizationUrl({ state, nonce, codeChallenge }),
+    };
+  }
+
+  async completeGoogleAuth(input: {
+    state: string;
+    nonce: string;
+    code: string;
+    codeVerifier: string;
+    agent: RequestAgent;
+  }): Promise<GoogleCompleteResult> {
+    ensure(this.googleProvider, 404, 'GOOGLE_DISABLED', 'El inicio con Google no esta habilitado');
+    const oauthState = await this.repository.consumeOAuthState(hashToken(input.state));
+    ensure(
+      oauthState,
+      400,
+      'OAUTH_STATE_INVALID',
+      'La transaccion de Google no es valida o expiro',
+    );
+    const actualNonce = Buffer.from(hashToken(input.nonce));
+    const expectedNonce = Buffer.from(oauthState.nonceHash);
+    ensure(
+      actualNonce.length === expectedNonce.length && timingSafeEqual(actualNonce, expectedNonce),
+      400,
+      'OAUTH_NONCE_INVALID',
+      'La transaccion de Google no es valida',
+    );
+    ensure(
+      oauthState.intent === 'login' || oauthState.intent === 'link',
+      400,
+      'OAUTH_STATE_INVALID',
+      'La transaccion de Google no es valida',
+    );
+    if (oauthState.intent === 'link')
+      ensure(
+        oauthState.userId,
+        400,
+        'OAUTH_STATE_INVALID',
+        'La transaccion de Google no es valida',
+      );
+    const idToken = await this.googleProvider.exchangeCode(input.code, input.codeVerifier);
+    const identity = await this.googleProvider.verifyIdToken(idToken, input.nonce);
+    const result = await this.repository.linkOrCreateGoogle(
+      identity,
+      oauthState.intent === 'link' ? (oauthState.userId ?? undefined) : undefined,
+    );
+    if (result.status === 'conflict')
+      throw new AppError(
+        409,
+        'GOOGLE_ACCOUNT_IN_USE',
+        'La cuenta de Google ya esta vinculada a otra cuenta',
+      );
+    if (result.status === 'unverified')
+      throw new AppError(400, 'GOOGLE_EMAIL_UNVERIFIED', 'El correo de Google no esta verificado');
+    ensure(
+      result.status !== 'inactive' && result.user,
+      401,
+      'ACCOUNT_INACTIVE',
+      'La cuenta no esta disponible',
+    );
+    if (oauthState.intent === 'link') return { intent: 'link', user: result.user };
+    return {
+      intent: 'login',
+      user: result.user,
+      session: await this.issueSession(result.user, input.agent),
+    };
+  }
+
+  async authMethods(userId: string) {
+    return this.repository.authMethods(userId);
+  }
+
+  async unlinkGoogle(userId: string): Promise<void> {
+    const result = await this.repository.unlinkGoogle(userId);
+    if (result === 'missing')
+      throw new AppError(404, 'GOOGLE_NOT_LINKED', 'Google no esta vinculado');
+    if (result === 'last')
+      throw new AppError(409, 'LAST_AUTH_METHOD', 'Conserva al menos un metodo de acceso');
   }
 
   async authenticate(sessionToken: string): Promise<AuthContext> {

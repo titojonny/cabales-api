@@ -13,6 +13,10 @@ const fundView = {
   archivedAt: true,
   createdAt: true,
   updatedAt: true,
+  contributionPolicy: true,
+  withdrawalPolicy: true,
+  closingPolicy: true,
+  withdrawalLimitCents: true,
 } as const;
 
 const movementView = {
@@ -22,6 +26,28 @@ const movementView = {
   description: true,
   createdAt: true,
   createdBy: { select: { id: true, displayName: true } },
+} as const;
+
+const contributionRequestView = {
+  id: true,
+  dueAt: true,
+  createdAt: true,
+  members: {
+    select: {
+      id: true,
+      amountCents: true,
+      status: true,
+      paidAt: true,
+      fundMember: {
+        select: {
+          id: true,
+          groupMemberId: true,
+          groupMember: { select: { user: { select: { id: true, displayName: true } } } },
+        },
+      },
+    },
+    orderBy: { fundMember: { groupMemberId: 'asc' as const } },
+  },
 } as const;
 
 /** Persistencia de fondos; el saldo siempre se deriva de movimientos inmutables. */
@@ -47,6 +73,10 @@ export class FundsRepository {
     description?: string | undefined;
     currency: string;
     memberIds: string[];
+    contributionPolicy: 'ANY_MEMBER' | 'MANAGERS' | 'GROUP_ADMINS';
+    withdrawalPolicy: 'ANY_MEMBER' | 'MANAGERS' | 'GROUP_ADMINS';
+    closingPolicy: 'ANY_MEMBER' | 'MANAGERS' | 'GROUP_ADMINS';
+    withdrawalLimitCents?: number | null;
     requestId: string;
   }) {
     return this.db.$transaction(async (tx) => {
@@ -56,6 +86,10 @@ export class FundsRepository {
           name: input.name,
           currency: input.currency,
           createdById: input.userId,
+          contributionPolicy: input.contributionPolicy,
+          withdrawalPolicy: input.withdrawalPolicy,
+          closingPolicy: input.closingPolicy,
+          withdrawalLimitCents: input.withdrawalLimitCents ?? null,
           ...(input.description ? { description: input.description } : {}),
           members: {
             create: [
@@ -141,6 +175,148 @@ export class FundsRepository {
       }),
     ]);
     return { members, totals };
+  }
+
+  fundMembers(fundId: string, ids: string[]) {
+    return this.db.fundMember.findMany({
+      where: { fundId, id: { in: ids } },
+      select: { id: true },
+    });
+  }
+
+  createContributionRequest(input: {
+    fundId: string;
+    createdById: string;
+    dueAt: Date;
+    members: Array<{ fundMemberId: string; amountCents: number }>;
+    requestId: string;
+  }) {
+    return this.db.$transaction(async (tx) => {
+      const request = await tx.fundContributionRequest.create({
+        data: {
+          fundId: input.fundId,
+          createdById: input.createdById,
+          dueAt: input.dueAt,
+          members: {
+            create: input.members.map(({ fundMemberId, amountCents }) => ({
+              amountCents,
+              fundMember: { connect: { id: fundMemberId } },
+            })),
+          },
+        },
+        select: contributionRequestView,
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: input.createdById,
+          action: 'fund.contribution_request_created',
+          entityType: 'FundContributionRequest',
+          entityId: request.id,
+          requestId: input.requestId,
+          metadata: { fundId: input.fundId, dueAt: input.dueAt.toISOString() },
+        },
+      });
+      return request;
+    });
+  }
+
+  contributionRequestMembers(fundId: string, status: string, limit: number) {
+    return this.db.fundContributionRequestMember.findMany({
+      where: {
+        request: { fundId },
+        ...(status === 'ALL' ? {} : { status }),
+      },
+      select: {
+        id: true,
+        amountCents: true,
+        status: true,
+        paidAt: true,
+        request: { select: { id: true, dueAt: true, createdAt: true } },
+        fundMember: {
+          select: {
+            id: true,
+            groupMemberId: true,
+            groupMember: { select: { user: { select: { id: true, displayName: true } } } },
+          },
+        },
+      },
+      orderBy: [{ request: { dueAt: 'asc' } }, { id: 'asc' }],
+      take: limit,
+    });
+  }
+
+  markOverdue(now: Date) {
+    return this.db.fundContributionRequestMember.updateMany({
+      where: { status: 'PENDING', request: { dueAt: { lt: now } } },
+      data: { status: 'OVERDUE' },
+    });
+  }
+
+  requestMember(fundId: string, requestMemberId: string) {
+    return this.db.fundContributionRequestMember.findFirst({
+      where: { id: requestMemberId, request: { fundId } },
+      select: {
+        id: true,
+        amountCents: true,
+        status: true,
+        fundMemberId: true,
+        request: { select: { id: true, dueAt: true } },
+        fundMember: { select: { groupMemberId: true, groupMember: { select: { userId: true } } } },
+      },
+    });
+  }
+
+  openRequestMemberForUser(fundId: string, userId: string, amountCents: number) {
+    return this.db.fundContributionRequestMember.findFirst({
+      where: {
+        amountCents,
+        status: { in: ['PENDING', 'OVERDUE'] },
+        request: { fundId },
+        fundMember: { groupMember: { userId } },
+      },
+      orderBy: [{ request: { dueAt: 'asc' } }, { id: 'asc' }],
+      select: { id: true, amountCents: true, status: true },
+    });
+  }
+
+  contributionMembersDueBetween(now: Date, until: Date) {
+    return this.db.fundContributionRequestMember.findMany({
+      where: { status: 'PENDING', request: { dueAt: { gt: now, lte: until } } },
+      select: {
+        id: true,
+        amountCents: true,
+        request: {
+          select: {
+            id: true,
+            dueAt: true,
+            fund: { select: { id: true, groupId: true, name: true, currency: true } },
+          },
+        },
+        fundMember: { select: { groupMember: { select: { userId: true } } } },
+      },
+      orderBy: [{ request: { dueAt: 'asc' } }, { id: 'asc' }],
+      take: 1000,
+    });
+  }
+
+  contributionMembersOverdue(now: Date) {
+    return this.db.fundContributionRequestMember.findMany({
+      where: { status: 'OVERDUE', request: { dueAt: { lt: now } } },
+      select: {
+        id: true,
+        amountCents: true,
+        request: {
+          select: {
+            id: true,
+            dueAt: true,
+            fund: { select: { id: true, groupId: true, name: true, currency: true } },
+          },
+        },
+        fundMember: { select: { groupMember: { select: { userId: true } } } },
+      },
+      orderBy: [{ request: { dueAt: 'asc' } }, { id: 'asc' }],
+      take: 1000,
+    });
   }
 
   update(fundId: string, data: Prisma.FundUpdateInput) {
@@ -281,6 +457,7 @@ export class FundsRepository {
     key: string;
     requestHash: string;
     requestId: string;
+    contributionRequestMemberId?: string;
   }) {
     const scope = `fund:movement:${input.fundId}`;
     try {
@@ -319,9 +496,22 @@ export class FundsRepository {
                 amountCents: input.signedAmountCents,
                 createdById: input.userId,
                 ...(input.description ? { description: input.description } : {}),
+                ...(input.contributionRequestMemberId
+                  ? { contributionRequestMemberId: input.contributionRequestMemberId }
+                  : {}),
               },
               select: movementView,
             });
+            if (input.contributionRequestMemberId) {
+              await tx.fundContributionRequestMember.updateMany({
+                where: {
+                  id: input.contributionRequestMemberId,
+                  status: { in: ['PENDING', 'OVERDUE'] },
+                  request: { fundId: input.fundId },
+                },
+                data: { status: 'PAID', paidAt: new Date() },
+              });
+            }
             const data = { movement, balanceCents: next };
             await tx.idempotencyKey.create({
               data: {

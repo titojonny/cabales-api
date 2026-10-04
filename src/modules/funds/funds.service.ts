@@ -1,9 +1,15 @@
-import { FundMovementType, FundRole, GroupRole } from '@prisma/client';
+import { FundAccessPolicy, FundMovementType, FundRole, GroupRole } from '@prisma/client';
 import { requestHash } from '../../shared/crypto.js';
 import { AppError, ensure } from '../../shared/errors.js';
 import type { DomainEvents } from '../../shared/events.js';
 import type { GroupsService } from '../groups/groups.service.js';
-import type { CreateFundInput, CreateMovementInput, UpdateFundInput } from './funds.schema.js';
+import type {
+  ContributionRequestsQuery,
+  CreateContributionRequestInput,
+  CreateFundInput,
+  CreateMovementInput,
+  UpdateFundInput,
+} from './funds.schema.js';
 import type { FundsRepository } from './funds.repository.js';
 
 const ALL_ROLES = [GroupRole.OWNER, GroupRole.ADMIN, GroupRole.MEMBER] as const;
@@ -35,6 +41,17 @@ export class FundsService {
     };
   }
 
+  private policyAllows(
+    policy: FundAccessPolicy,
+    groupRole: GroupRole,
+    fundRole: FundRole | null,
+  ): boolean {
+    if (policy === FundAccessPolicy.GROUP_ADMINS) return groupRole !== GroupRole.MEMBER;
+    if (policy === FundAccessPolicy.MANAGERS)
+      return groupRole !== GroupRole.MEMBER || fundRole === FundRole.MANAGER;
+    return fundRole !== null;
+  }
+
   private async requireManage(userId: string, groupId: string, fundId: string) {
     const context = await this.access(userId, groupId, fundId);
     if (!context.canManage)
@@ -63,6 +80,10 @@ export class FundsService {
         description: input.description,
         currency: group.currency,
         memberIds,
+        contributionPolicy: input.contributionPolicy,
+        withdrawalPolicy: input.withdrawalPolicy,
+        closingPolicy: input.closingPolicy,
+        withdrawalLimitCents: input.withdrawalLimitCents ?? null,
         requestId,
       });
       return { ...fund, balanceCents: 0, myRole: FundRole.MANAGER, canManage: true };
@@ -95,6 +116,12 @@ export class FundsService {
       this.repository.detail(fundId),
       this.repository.balances([fundId]),
     ]);
+    await this.repository.markOverdue(new Date());
+    const contributionRequests = await this.repository.contributionRequestMembers(
+      fundId,
+      'ALL',
+      100,
+    );
     const byType = Object.fromEntries(
       Object.values(FundMovementType).map((type) => {
         const row = totals.find((total) => total.type === type);
@@ -106,7 +133,27 @@ export class FundsService {
       balanceCents: balances.get(fundId) ?? 0,
       myRole: context.role,
       canManage: context.canManage,
-      canContribute: Boolean(context.fundMember) && !context.fund.archivedAt,
+      canContribute:
+        !context.fund.archivedAt &&
+        this.policyAllows(
+          context.fund.contributionPolicy ?? FundAccessPolicy.ANY_MEMBER,
+          context.membership.role,
+          context.fundMember?.role ?? null,
+        ),
+      canWithdraw:
+        !context.fund.archivedAt &&
+        this.policyAllows(
+          context.fund.withdrawalPolicy ?? FundAccessPolicy.MANAGERS,
+          context.membership.role,
+          context.fundMember?.role ?? null,
+        ),
+      canClose:
+        !context.fund.archivedAt &&
+        this.policyAllows(
+          context.fund.closingPolicy ?? FundAccessPolicy.MANAGERS,
+          context.membership.role,
+          context.fundMember?.role ?? null,
+        ),
       totals: byType,
       members: members.map((member) => ({
         id: member.id,
@@ -115,7 +162,90 @@ export class FundsService {
         groupMemberId: member.groupMember.id,
         user: member.groupMember.user,
       })),
+      contributionRequests: contributionRequests.map((item) => ({
+        id: item.id,
+        requestId: item.request.id,
+        dueAt: item.request.dueAt,
+        amountCents: item.amountCents,
+        status: item.status,
+        paidAt: item.paidAt,
+        fundMemberId: item.fundMember.id,
+        groupMemberId: item.fundMember.groupMemberId,
+        user: item.fundMember.groupMember.user,
+      })),
     };
+  }
+
+  async createContributionRequest(
+    userId: string,
+    groupId: string,
+    fundId: string,
+    input: CreateContributionRequestInput,
+    requestId: string,
+  ) {
+    const context = await this.requireManage(userId, groupId, fundId);
+    ensure(!context.fund.archivedAt, 409, 'FUND_ARCHIVED', 'El fondo esta archivado');
+    const dueAt = new Date(input.dueAt);
+    ensure(
+      dueAt.getTime() > Date.now(),
+      422,
+      'CONTRIBUTION_DUE_DATE_INVALID',
+      'La fecha limite debe estar en el futuro',
+    );
+    ensure(
+      dueAt.getTime() <= Date.now() + 366 * 24 * 60 * 60 * 1000,
+      422,
+      'CONTRIBUTION_DUE_DATE_TOO_FAR',
+      'La fecha limite no puede superar un ano',
+    );
+    const memberIds = input.members.map((member) => member.fundMemberId);
+    ensure(
+      new Set(memberIds).size === memberIds.length,
+      422,
+      'DUPLICATE_FUND_MEMBER',
+      'No repitas integrantes en una solicitud',
+    );
+    const found = await this.repository.fundMembers(fundId, memberIds);
+    ensure(
+      found.length === memberIds.length,
+      422,
+      'FUND_MEMBER_NOT_FOUND',
+      'Un integrante no pertenece al fondo',
+    );
+    return this.repository.createContributionRequest({
+      fundId,
+      createdById: userId,
+      dueAt,
+      members: input.members,
+      requestId,
+    });
+  }
+
+  async contributionRequests(
+    userId: string,
+    groupId: string,
+    fundId: string,
+    query: ContributionRequestsQuery,
+  ) {
+    await this.access(userId, groupId, fundId);
+    await this.repository.markOverdue(new Date());
+    const rows = await this.repository.contributionRequestMembers(
+      fundId,
+      query.status,
+      query.limit,
+    );
+    return rows.map((item) => ({
+      id: item.id,
+      requestId: item.request.id,
+      dueAt: item.request.dueAt,
+      createdAt: item.request.createdAt,
+      amountCents: item.amountCents,
+      status: item.status,
+      paidAt: item.paidAt,
+      fundMemberId: item.fundMember.id,
+      groupMemberId: item.fundMember.groupMemberId,
+      user: item.fundMember.groupMember.user,
+    }));
   }
 
   async update(userId: string, groupId: string, fundId: string, input: UpdateFundInput) {
@@ -124,6 +254,16 @@ export class FundsService {
       return await this.repository.update(fundId, {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.contributionPolicy !== undefined
+          ? { contributionPolicy: input.contributionPolicy }
+          : {}),
+        ...(input.withdrawalPolicy !== undefined
+          ? { withdrawalPolicy: input.withdrawalPolicy }
+          : {}),
+        ...(input.closingPolicy !== undefined ? { closingPolicy: input.closingPolicy } : {}),
+        ...(input.withdrawalLimitCents !== undefined
+          ? { withdrawalLimitCents: input.withdrawalLimitCents }
+          : {}),
       });
     } catch (error) {
       if ((error as { code?: string })?.code === 'P2002') {
@@ -134,7 +274,17 @@ export class FundsService {
   }
 
   async archive(userId: string, groupId: string, fundId: string) {
-    const context = await this.requireManage(userId, groupId, fundId);
+    const context = await this.access(userId, groupId, fundId);
+    ensure(
+      this.policyAllows(
+        context.fund.closingPolicy ?? FundAccessPolicy.MANAGERS,
+        context.membership.role,
+        context.fundMember?.role ?? null,
+      ),
+      403,
+      'FUND_FORBIDDEN',
+      'No tienes permiso para cerrar este fondo',
+    );
     const result = await this.repository.archiveAtomic(fundId);
     ensure(result.outcome !== 'NOT_FOUND', 404, 'FUND_NOT_FOUND', 'Fondo no encontrado');
     ensure(
@@ -242,8 +392,81 @@ export class FundsService {
     requestId: string,
   ) {
     const context = await this.access(userId, groupId, fundId);
+    const hash = requestHash(input);
+    const replay = await this.repository.findIdempotency(userId, `fund:movement:${fundId}`, key);
+    if (replay) {
+      ensure(
+        replay.requestHash === hash,
+        409,
+        'IDEMPOTENCY_CONFLICT',
+        'La llave ya se uso con otra solicitud',
+      );
+      return { data: replay.responseBody, replayed: true };
+    }
+    let contributionRequestMemberId: string | undefined;
     if (input.type === 'CONTRIBUTION') {
+      ensure(
+        !context.fund.archivedAt &&
+          this.policyAllows(
+            context.fund.contributionPolicy ?? FundAccessPolicy.ANY_MEMBER,
+            context.membership.role,
+            context.fundMember?.role ?? null,
+          ),
+        403,
+        'FUND_FORBIDDEN',
+        'No tienes permiso para aportar a este fondo',
+      );
       ensure(context.fundMember, 403, 'FUND_FORBIDDEN', 'Solo miembros del fondo pueden aportar');
+      if (input.contributionRequestMemberId) {
+        const requestMember = await this.repository.requestMember(
+          fundId,
+          input.contributionRequestMemberId,
+        );
+        ensure(
+          requestMember && requestMember.fundMemberId === context.fundMember.id,
+          404,
+          'CONTRIBUTION_REQUEST_NOT_FOUND',
+          'Solicitud de aporte no encontrada',
+        );
+        ensure(
+          requestMember.status === 'PENDING' || requestMember.status === 'OVERDUE',
+          409,
+          'CONTRIBUTION_REQUEST_PAID',
+          'El aporte solicitado ya fue registrado',
+        );
+        ensure(
+          requestMember.amountCents === input.amountCents,
+          422,
+          'CONTRIBUTION_AMOUNT_MISMATCH',
+          'El aporte no coincide con el importe solicitado',
+        );
+        contributionRequestMemberId = requestMember.id;
+      } else {
+        const matching = await this.repository.openRequestMemberForUser(
+          fundId,
+          userId,
+          input.amountCents,
+        );
+        contributionRequestMemberId = matching?.id;
+      }
+    } else if (input.type === 'WITHDRAWAL') {
+      ensure(
+        this.policyAllows(
+          context.fund.withdrawalPolicy ?? FundAccessPolicy.MANAGERS,
+          context.membership.role,
+          context.fundMember?.role ?? null,
+        ),
+        403,
+        'FUND_FORBIDDEN',
+        'No tienes permiso para retirar de este fondo',
+      );
+      ensure(
+        context.fund.withdrawalLimitCents === null ||
+          input.amountCents <= context.fund.withdrawalLimitCents,
+        422,
+        'WITHDRAWAL_LIMIT_EXCEEDED',
+        'El retiro supera el limite configurado para este fondo',
+      );
     } else if (!context.canManage) {
       throw new AppError(
         403,
@@ -251,7 +474,6 @@ export class FundsService {
         'Solo quien administra el fondo registra retiros o ajustes',
       );
     }
-    const hash = requestHash(input);
     const signed = input.type === 'WITHDRAWAL' ? -input.amountCents : input.amountCents;
     const result = await this.repository.createMovementAtomic({
       fundId,
@@ -262,6 +484,7 @@ export class FundsService {
       key,
       requestHash: hash,
       requestId,
+      ...(contributionRequestMemberId ? { contributionRequestMemberId } : {}),
     });
     ensure(result.outcome !== 'NOT_FOUND', 404, 'FUND_NOT_FOUND', 'Fondo no encontrado');
     ensure(result.outcome !== 'ARCHIVED', 409, 'FUND_ARCHIVED', 'El fondo esta archivado');

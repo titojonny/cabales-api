@@ -6,6 +6,10 @@ export const createFundSchema = z
     name: z.string().trim().min(2).max(120),
     description: z.string().trim().max(500).optional(),
     memberIds: z.array(z.string().uuid()).max(100).default([]),
+    contributionPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).default('ANY_MEMBER'),
+    withdrawalPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).default('MANAGERS'),
+    closingPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).default('MANAGERS'),
+    withdrawalLimitCents: z.number().int().positive().max(MAX_MONEY_CENTS).nullable().optional(),
   })
   .strict();
 
@@ -13,6 +17,10 @@ export const updateFundSchema = z
   .object({
     name: z.string().trim().min(2).max(120).optional(),
     description: z.string().trim().max(500).nullable().optional(),
+    contributionPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).optional(),
+    withdrawalPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).optional(),
+    closingPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).optional(),
+    withdrawalLimitCents: z.number().int().positive().max(MAX_MONEY_CENTS).nullable().optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un cambio');
@@ -26,6 +34,30 @@ export const addFundMemberSchema = z
 
 export const updateFundMemberSchema = z.object({ role: z.enum(['MANAGER', 'MEMBER']) }).strict();
 
+export const createContributionRequestSchema = z
+  .object({
+    dueAt: z.string().datetime({ offset: true }),
+    members: z
+      .array(
+        z
+          .object({
+            fundMemberId: z.string().uuid(),
+            amountCents: z.number().int().positive().max(MAX_MONEY_CENTS),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
+  })
+  .strict();
+
+export const contributionRequestsQuerySchema = z
+  .object({
+    status: z.enum(['PENDING', 'PAID', 'OVERDUE', 'ALL']).default('ALL'),
+    limit: z.coerce.number().int().min(1).max(100).default(100),
+  })
+  .strict();
+
 /** Movimiento inmutable. ADJUSTMENT admite signo y exige descripción. */
 export const createMovementSchema = z.discriminatedUnion('type', [
   z
@@ -33,6 +65,7 @@ export const createMovementSchema = z.discriminatedUnion('type', [
       type: z.literal('CONTRIBUTION'),
       amountCents: z.number().int().positive().max(MAX_MONEY_CENTS),
       description: z.string().trim().max(500).optional(),
+      contributionRequestMemberId: z.string().uuid().optional(),
     })
     .strict(),
   z
@@ -66,3 +99,5 @@ export const movementsQuerySchema = z
 export type CreateFundInput = z.infer<typeof createFundSchema>;
 export type UpdateFundInput = z.infer<typeof updateFundSchema>;
 export type CreateMovementInput = z.infer<typeof createMovementSchema>;
+export type CreateContributionRequestInput = z.infer<typeof createContributionRequestSchema>;
+export type ContributionRequestsQuery = z.infer<typeof contributionRequestsQuerySchema>;

@@ -132,7 +132,7 @@ export class BudgetsService {
   /** Presupuestos afectados por un gasto nuevo con su progreso en el periodo del gasto. */
   async affectedBy(expenseId: string) {
     const expense = await this.repository.expense(expenseId);
-    if (!expense) return [];
+    if (!expense || !expense.groupId) return [];
     const budgets = await this.repository.budgetsFor(expense.groupId, expense.currency);
     const affected = budgets.filter(
       (budget) => !budget.category || budget.category.id === expense.categoryId,

@@ -10,7 +10,14 @@ export const NOTIFICATION_TYPES = [
   'fund.movement',
   'ocr.finished',
   'privacy.updated',
+  'document.expiring',
+  'document.expired',
   'achievement.unlocked',
+  'event.reminder',
+  'recurring.expense',
+  'event.comment',
+  'fund.contribution_due',
+  'fund.contribution_overdue',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];

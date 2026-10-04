@@ -51,8 +51,14 @@ export class OcrService {
       'UNSUPPORTED_MEDIA_TYPE',
       'El documento no admite OCR',
     );
+    ensure(
+      !(this.provider.name === 'tesseract' && document.mimeType === 'application/pdf'),
+      415,
+      'OCR_TESSERACT_PDF_UNSUPPORTED',
+      'El OCR local con Tesseract no admite PDF; sube una imagen JPEG, PNG o WebP',
+    );
     const job = await this.repository.create(documentId, userId, requestId);
-    this.schedule(job.id, userId, document.storageKey, document.mimeType);
+    this.schedule(job.id, userId, documentId, document.mimeType);
     return this.present(job);
   }
 
@@ -82,7 +88,7 @@ export class OcrService {
     const document = await this.documents.readForProcessing(userId, job.documentId);
     const requeued = await this.repository.requeue(jobId, this.options.maxAttempts);
     ensure(requeued.count === 1, 409, 'OCR_NOT_RETRYABLE', 'El trabajo cambio de estado');
-    this.schedule(jobId, userId, document.storageKey, document.mimeType);
+    this.schedule(jobId, userId, job.documentId, document.mimeType);
     return this.present((await this.repository.find(jobId))!);
   }
 
@@ -107,11 +113,15 @@ export class OcrService {
     ensure(job.documentId, 409, 'OCR_NOT_READY', 'El documento ya no existe');
     const expense = await this.repository.expenseGroup(expenseId);
     ensure(expense, 404, 'EXPENSE_NOT_FOUND', 'Gasto no encontrado');
-    await this.groups.requireRole(userId, expense.groupId, [
-      GroupRole.OWNER,
-      GroupRole.ADMIN,
-      GroupRole.MEMBER,
-    ]);
+    if (expense.groupId) {
+      await this.groups.requireRole(userId, expense.groupId, [
+        GroupRole.OWNER,
+        GroupRole.ADMIN,
+        GroupRole.MEMBER,
+      ]);
+    } else {
+      ensure(expense.ownerUserId === userId, 403, 'FORBIDDEN', 'No tienes acceso a este gasto');
+    }
     const document = await this.documents.readForProcessing(userId, job.documentId);
     const access = await this.documents.accessLevel(userId, document);
     const canLink =
@@ -129,16 +139,16 @@ export class OcrService {
     return this.present(confirmed);
   }
 
-  private schedule(jobId: string, userId: string, storageKey: string, mimeType: string) {
-    this.background.run('ocr.process', () => this.process(jobId, userId, storageKey, mimeType));
+  private schedule(jobId: string, userId: string, documentId: string, mimeType: string) {
+    this.background.run('ocr.process', () => this.process(jobId, userId, documentId, mimeType));
   }
 
   /** Procesa un intento; cualquier error queda como FAILED con código estable. */
-  async process(jobId: string, userId: string, storageKey: string, mimeType: string) {
+  async process(jobId: string, userId: string, documentId: string, mimeType: string) {
     if (!(await this.repository.claim(jobId))) return;
     let status: 'SUCCEEDED' | 'FAILED' = 'FAILED';
     try {
-      const bytes = await this.documents.readBytes(storageKey);
+      const { bytes } = await this.documents.readDocumentForProcessing(userId, documentId);
       const proposal = await this.provider.extract({ bytes, mimeType });
       await this.repository.succeed(jobId, proposal as unknown as Prisma.InputJsonValue);
       status = 'SUCCEEDED';

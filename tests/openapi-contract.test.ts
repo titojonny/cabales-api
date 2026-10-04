@@ -16,15 +16,54 @@ const MOUNTS: Record<string, string> = {
   ocr: '/ocr',
   cabudas: '/cabudas',
   statistics: '/statistics',
+  incomes: '/incomes',
   notifications: '/notifications',
   achievements: '/achievements',
+  categories: '/categories',
+  tags: '/tags',
+  'recurring-expenses': '/recurring-expenses',
 };
 const ROUTE = /router\.(get|post|put|patch|delete)\(\s*'([^']*)'/g;
 const LOOP = /for \(const path of \[([^\]]+)\]\)\s*\{\s*router\.(get|post|put|patch|delete)\(path/g;
 
+const EXTRA_ROUTERS: Array<{
+  relativePath: string;
+  prefix: string;
+  from?: string;
+}> = [
+  { relativePath: 'expenses/personal-expenses.router.ts', prefix: '/expenses' },
+  {
+    relativePath: 'tags/tags.router.ts',
+    prefix: '/groups/:groupId/tags',
+    from: 'export function createGroupTagsRouter',
+  },
+  {
+    relativePath: 'recurring-expenses/recurring-expenses.router.ts',
+    prefix: '/groups/:groupId/recurring-expenses',
+    from: 'export function createGroupRecurringRouter',
+  },
+  {
+    relativePath: 'achievements/achievements-group.router.ts',
+    prefix: '/groups/:groupId/achievements',
+  },
+];
+
 function normalize(route: string) {
   const clean = route.replace(/\/$/, '') || '/';
   return clean.replace(/:([A-Za-z]+)/g, '{$1}');
+}
+
+function collectRoutes(routes: Set<string>, source: string, prefix: string) {
+  const storageStart = source.indexOf('export function createLocalStorageRouter');
+  for (const match of source.matchAll(ROUTE)) {
+    const base = storageStart >= 0 && match.index > storageStart ? '/storage' : prefix;
+    routes.add(`${match[1]!.toUpperCase()} ${normalize(`/api/v1${base}${match[2]}`)}`);
+  }
+  for (const match of source.matchAll(LOOP)) {
+    for (const literal of match[1]!.matchAll(/'([^']+)'/g)) {
+      routes.add(`${match[2]!.toUpperCase()} ${normalize(`/api/v1${prefix}${literal[1]}`)}`);
+    }
+  }
 }
 
 function implementedRoutes() {
@@ -38,18 +77,36 @@ function implementedRoutes() {
     } catch {
       continue;
     }
+    if (dir === 'collaboration') continue;
     const prefix = MOUNTS[dir];
     expect(prefix, `Router sin prefijo conocido: ${dir}`).toBeDefined();
-    const storageStart = source.indexOf('export function createLocalStorageRouter');
-    for (const match of source.matchAll(ROUTE)) {
-      const base = storageStart >= 0 && match.index > storageStart ? '/storage' : prefix;
-      routes.add(`${match[1]!.toUpperCase()} ${normalize(`/api/v1${base}${match[2]}`)}`);
-    }
-    for (const match of source.matchAll(LOOP)) {
-      for (const literal of match[1]!.matchAll(/'([^']+)'/g)) {
-        routes.add(`${match[2]!.toUpperCase()} ${normalize(`/api/v1${prefix}${literal[1]}`)}`);
-      }
-    }
+    if (prefix === undefined) continue;
+    collectRoutes(routes, source, prefix);
+  }
+  for (const extra of EXTRA_ROUTERS) {
+    const source = readFileSync(path.join(modules, extra.relativePath), 'utf8');
+    const scopedSource = extra.from ? source.slice(source.indexOf(extra.from)) : source;
+    collectRoutes(routes, scopedSource, extra.prefix);
+  }
+  const collaboration = readFileSync(path.join(modules, 'collaboration', 'collaboration.router.ts'), 'utf8');
+  const collaborationRouters: Array<[string, string]> = [
+    ['createGroupCollaborationRouter', '/groups'],
+    ['createEventCollaborationRouter', '/groups/:groupId/events'],
+    ['createExpenseCollaborationRouter', '/groups/:groupId/expenses'],
+    ['createPublicShareRouter', '/share/summaries'],
+    ['createCalendarRouter', '/calendar'],
+  ];
+  for (const [name, prefix] of collaborationRouters) {
+    const start = collaboration.indexOf(`export function ${name}`);
+    const next = collaboration.indexOf('\nexport function ', start + 1);
+    collectRoutes(routes, collaboration.slice(start, next < 0 ? collaboration.length : next), prefix);
+  }
+  const sharedRouter = readFileSync(
+    path.join(modules, 'documents', 'document-shared.router.ts'),
+    'utf8',
+  );
+  for (const match of sharedRouter.matchAll(ROUTE)) {
+    routes.add(`${match[1]!.toUpperCase()} ${normalize(`/api/v1/share/documents${match[2]}`)}`);
   }
   return routes;
 }
@@ -64,7 +121,7 @@ function documentedRoutes() {
       continue;
     }
     if (/^\S/.test(line)) current = null;
-    const method = /^ {4}(get|post|put|patch|delete):\s*$/.exec(line);
+    const method = /^ {4}(get|post|put|patch|delete):(?:\s|$)/.exec(line);
     if (current?.startsWith('/api/v1') && method)
       routes.add(`${method[1]!.toUpperCase()} ${current}`);
   }
