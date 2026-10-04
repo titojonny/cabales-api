@@ -74,6 +74,12 @@ enum FundMovementType {
   ADJUSTMENT
 }
 
+enum FundAccessPolicy {
+  ANY_MEMBER
+  MANAGERS
+  GROUP_ADMINS
+}
+
 enum BudgetPeriod {
   WEEKLY
   MONTHLY
@@ -195,6 +201,8 @@ model User {
   createdRecurringExpenses RecurringExpense[]      @relation("RecurringExpenseCreator")
   notificationPreferences NotificationPreference[]
   incomes                 Income[]
+  createdPublicShareLinks PublicShareLink[] @relation("PublicShareLinkCreator")
+  createdEventComments    EventComment[] @relation("EventCommentAuthor")
 }
 
 /// Credencial desacoplada para permitir otros proveedores sin contaminar User.
@@ -268,6 +276,7 @@ model Group {
   budgets     Budget[]
   recurring   RecurringExpense[]
   documents   Document[]
+  publicShareLinks PublicShareLink[]
 
   @@index([createdById])
   @@index([createdAt])
@@ -341,10 +350,63 @@ model Event {
   recurring    RecurringExpense[]
   settlement   Settlement?
   documents    Document[]
+  funds        EventFund[]
+  comments     EventComment[]
+  publicShareLinks PublicShareLink[]
 
   @@index([groupId, startsAt])
   @@index([groupId, status])
   @@index([createdById])
+}
+
+/// Asociación explícita de eventos con fondos del mismo grupo.
+model EventFund {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String   @db.Uuid
+  fundId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  fund      Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, fundId])
+  @@index([eventId])
+  @@index([fundId])
+}
+
+/// Hilo de colaboración en texto plano; la salida HTTP nunca incluye HTML.
+model EventComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  eventId      String   @db.Uuid
+  authorUserId String   @db.Uuid
+  body         String   @db.VarChar(2000)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  author       User     @relation("EventCommentAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([eventId, createdAt])
+  @@index([authorUserId, createdAt])
+}
+
+/// Enlace público de solo lectura; el token claro solo se entrega al crear el enlace.
+model PublicShareLink {
+  id          String     @id @default(uuid()) @db.Uuid
+  groupId     String     @db.Uuid
+  eventId     String?    @db.Uuid
+  settlementId String?   @db.Uuid
+  tokenHash   String     @unique @db.Char(64)
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdById String     @db.Uuid
+  createdAt   DateTime   @default(now())
+  group       Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  event       Event?     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  settlement  Settlement? @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  createdBy   User       @relation("PublicShareLinkCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([groupId, expiresAt])
+  @@index([eventId, expiresAt])
+  @@index([settlementId, expiresAt])
 }
 
 /// Participante canónico del evento: miembro registrado XOR invitado por nombre.
@@ -551,6 +613,7 @@ model Settlement {
   createdBy   User                 @relation("SettlementCreator", fields: [createdById], references: [id], onDelete: Restrict)
   transfers   SettlementTransfer[]
   documents   Document[]
+  publicShareLinks PublicShareLink[]
 
   @@index([groupId, createdAt])
   @@index([createdById])
@@ -605,10 +668,15 @@ model Fund {
   archivedAt  DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @default(now()) @updatedAt
+  contributionPolicy FundAccessPolicy @default(ANY_MEMBER)
+  withdrawalPolicy FundAccessPolicy @default(MANAGERS)
+  closingPolicy FundAccessPolicy @default(MANAGERS)
+  withdrawalLimitCents Int?
   group       Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
   createdBy   User           @relation("FundCreator", fields: [createdById], references: [id], onDelete: Restrict)
   members     FundMember[]
   movements   FundMovement[]
+  eventLinks  EventFund[]
 
   @@unique([groupId, name])
   @@index([createdById])

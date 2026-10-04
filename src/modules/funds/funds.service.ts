@@ -1,4 +1,4 @@
-import { FundMovementType, FundRole, GroupRole } from '@prisma/client';
+import { FundAccessPolicy, FundMovementType, FundRole, GroupRole } from '@prisma/client';
 import { requestHash } from '../../shared/crypto.js';
 import { AppError, ensure } from '../../shared/errors.js';
 import type { DomainEvents } from '../../shared/events.js';
@@ -35,6 +35,17 @@ export class FundsService {
     };
   }
 
+  private policyAllows(
+    policy: FundAccessPolicy,
+    groupRole: GroupRole,
+    fundRole: FundRole | null,
+  ): boolean {
+    if (policy === FundAccessPolicy.GROUP_ADMINS) return groupRole !== GroupRole.MEMBER;
+    if (policy === FundAccessPolicy.MANAGERS)
+      return groupRole !== GroupRole.MEMBER || fundRole === FundRole.MANAGER;
+    return fundRole !== null;
+  }
+
   private async requireManage(userId: string, groupId: string, fundId: string) {
     const context = await this.access(userId, groupId, fundId);
     if (!context.canManage)
@@ -63,6 +74,10 @@ export class FundsService {
         description: input.description,
         currency: group.currency,
         memberIds,
+        contributionPolicy: input.contributionPolicy,
+        withdrawalPolicy: input.withdrawalPolicy,
+        closingPolicy: input.closingPolicy,
+        withdrawalLimitCents: input.withdrawalLimitCents ?? null,
         requestId,
       });
       return { ...fund, balanceCents: 0, myRole: FundRole.MANAGER, canManage: true };
@@ -106,7 +121,27 @@ export class FundsService {
       balanceCents: balances.get(fundId) ?? 0,
       myRole: context.role,
       canManage: context.canManage,
-      canContribute: Boolean(context.fundMember) && !context.fund.archivedAt,
+      canContribute:
+        !context.fund.archivedAt &&
+        this.policyAllows(
+          context.fund.contributionPolicy ?? FundAccessPolicy.ANY_MEMBER,
+          context.membership.role,
+          context.fundMember?.role ?? null,
+        ),
+      canWithdraw:
+        !context.fund.archivedAt &&
+        this.policyAllows(
+          context.fund.withdrawalPolicy ?? FundAccessPolicy.MANAGERS,
+          context.membership.role,
+          context.fundMember?.role ?? null,
+        ),
+      canClose:
+        !context.fund.archivedAt &&
+        this.policyAllows(
+          context.fund.closingPolicy ?? FundAccessPolicy.MANAGERS,
+          context.membership.role,
+          context.fundMember?.role ?? null,
+        ),
       totals: byType,
       members: members.map((member) => ({
         id: member.id,
@@ -124,6 +159,10 @@ export class FundsService {
       return await this.repository.update(fundId, {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.contributionPolicy !== undefined ? { contributionPolicy: input.contributionPolicy } : {}),
+        ...(input.withdrawalPolicy !== undefined ? { withdrawalPolicy: input.withdrawalPolicy } : {}),
+        ...(input.closingPolicy !== undefined ? { closingPolicy: input.closingPolicy } : {}),
+        ...(input.withdrawalLimitCents !== undefined ? { withdrawalLimitCents: input.withdrawalLimitCents } : {}),
       });
     } catch (error) {
       if ((error as { code?: string })?.code === 'P2002') {
@@ -134,7 +173,13 @@ export class FundsService {
   }
 
   async archive(userId: string, groupId: string, fundId: string) {
-    const context = await this.requireManage(userId, groupId, fundId);
+    const context = await this.access(userId, groupId, fundId);
+    ensure(
+      this.policyAllows(context.fund.closingPolicy ?? FundAccessPolicy.MANAGERS, context.membership.role, context.fundMember?.role ?? null),
+      403,
+      'FUND_FORBIDDEN',
+      'No tienes permiso para cerrar este fondo',
+    );
     const result = await this.repository.archiveAtomic(fundId);
     ensure(result.outcome !== 'NOT_FOUND', 404, 'FUND_NOT_FOUND', 'Fondo no encontrado');
     ensure(
@@ -243,7 +288,26 @@ export class FundsService {
   ) {
     const context = await this.access(userId, groupId, fundId);
     if (input.type === 'CONTRIBUTION') {
-      ensure(context.fundMember, 403, 'FUND_FORBIDDEN', 'Solo miembros del fondo pueden aportar');
+      ensure(
+        !context.fund.archivedAt &&
+          this.policyAllows(context.fund.contributionPolicy ?? FundAccessPolicy.ANY_MEMBER, context.membership.role, context.fundMember?.role ?? null),
+        403,
+        'FUND_FORBIDDEN',
+        'No tienes permiso para aportar a este fondo',
+      );
+    } else if (input.type === 'WITHDRAWAL') {
+      ensure(
+        this.policyAllows(context.fund.withdrawalPolicy ?? FundAccessPolicy.MANAGERS, context.membership.role, context.fundMember?.role ?? null),
+        403,
+        'FUND_FORBIDDEN',
+        'No tienes permiso para retirar de este fondo',
+      );
+      ensure(
+        context.fund.withdrawalLimitCents === null || input.amountCents <= context.fund.withdrawalLimitCents,
+        422,
+        'WITHDRAWAL_LIMIT_EXCEEDED',
+        'El retiro supera el limite configurado para este fondo',
+      );
     } else if (!context.canManage) {
       throw new AppError(
         403,

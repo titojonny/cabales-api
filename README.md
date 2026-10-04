@@ -336,6 +336,18 @@ Las subidas nuevas usan AES-256-GCM con sobre por documento cuando existe el ani
 
 El bloqueo de Docs usa PIN Argon2id y/o WebAuthn, ligado a la sesión por `documentsUnlockedAt`; el desbloqueo se pierde al cerrar sesión. `WEBAUTHN_RP_ID` y `WEBAUTHN_ORIGIN` se derivan de `APP_ORIGIN` si no se configuran.
 
+## P8: compartir y colaboración
+
+La migración `20261004080000_p8_colaboracion` añade enlaces de resumen público para eventos o liquidaciones, con token aleatorio de 256 bits almacenado únicamente como SHA-256, caducidad de 1 a 30 días, revocación y límite por IP. `GET /api/v1/share/summaries/:token` devuelve solo nombres visibles, totales y transferencias; nunca devuelve correos, hashes ni el token.
+
+Los eventos disponen de plantillas de repetición, hilo de comentarios de texto plano (`GET|POST|PATCH|DELETE .../comments`), asociación con varios fondos y saldos/aportes derivados. Los comentarios se limitan a 2.000 caracteres, rechazan HTML, exigen pertenencia al grupo y notifican a participantes registrados respetando sus preferencias. OWNER/ADMIN modera comentarios ajenos.
+
+Los fondos tienen políticas `ANY_MEMBER`, `MANAGERS` o `GROUP_ADMINS` para aportar, retirar y cerrar, además de `withdrawalLimitCents`; cada decisión se vuelve a comprobar en el servidor y los valores por defecto conservan las reglas anteriores. La asociación evento-fondo valida pertenencia al mismo grupo y moneda.
+
+`GET /api/v1/calendar/events` entrega el rango de eventos de los grupos de la persona autenticada, limitado a 93 días. El cliente muestra calendario mensual y agenda, y las invitaciones generan el QR localmente con `qrcode`; el token continúa en el fragmento `#token=` y el PNG se descarga sin servicios externos.
+
+No hay variables de entorno nuevas en P8. La verificación específica debe ejecutar las pruebas unitarias y de integración con PostgreSQL/Redis reales, además de las pruebas de app y E2E; esta rama no ejecuta `tsc`, Vitest, Vite build, Prisma generate ni Playwright por la restricción del sandbox.
+
 ## Principios aplicados
 
 El contrato OpenAPI de P4 se comprueba contra todas las operaciones montadas, incluidos los routers personales separados y las acciones de pausa, reanudacion y borrado de recurrentes. No se documentan rutas personales que no esten montadas.

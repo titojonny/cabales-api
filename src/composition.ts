@@ -3,6 +3,7 @@ import type { AppConfig } from './config/env.js';
 import type { AppLogger } from './config/logger.js';
 import { createDatabase, type Database } from './database/client.js';
 import { createApp } from './http/app.js';
+import { CollaborationService } from './modules/collaboration/collaboration.service.js';
 import { BackgroundTasks } from './infrastructure/background.js';
 import {
   HttpEmailProvider,
@@ -214,6 +215,10 @@ export function createContainer(
     appOrigin: config.APP_ORIGIN,
     budgets,
   });
+  const collaboration = new CollaborationService(db, groups, {
+    appOrigin: config.APP_ORIGIN,
+    notifications,
+  });
   const recurringExpenses = new RecurringExpensesService(db, groups, notifications, domainEvents);
   const eventReminders = new EventRemindersService(eventsRepository, notifications);
   const scheduler = new TaskScheduler({
@@ -277,6 +282,7 @@ export function createContainer(
     cabudas: new CabudasService(db),
     statistics: new StatisticsService(db, budgets, budgetsRepository),
     incomes: new IncomesService(new IncomesRepository(db)),
+    collaboration,
     notifications,
     achievements,
     readiness: async () => {

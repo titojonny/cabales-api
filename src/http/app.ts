@@ -25,6 +25,8 @@ import type { BudgetsService } from '../modules/budgets/budgets.service.js';
 import { createBudgetsRouter } from '../modules/budgets/budgets.router.js';
 import type { CabudasService } from '../modules/cabudas/cabudas.service.js';
 import { createCabudasRouter } from '../modules/cabudas/cabudas.router.js';
+import type { CollaborationService } from '../modules/collaboration/collaboration.service.js';
+import { createCalendarRouter, createEventCollaborationRouter, createExpenseCollaborationRouter, createGroupCollaborationRouter, createPublicShareRouter } from '../modules/collaboration/collaboration.router.js';
 import type { PersonalCategoriesService } from '../modules/categories/categories.service.js';
 import { createPersonalCategoriesRouter } from '../modules/categories/categories.router.js';
 import type { DocumentsService } from '../modules/documents/documents.service.js';
@@ -94,6 +96,7 @@ export interface AppDependencies {
   notifications?: NotificationsService;
   achievements?: AchievementsService;
   incomes?: IncomesService;
+  collaboration?: CollaborationService;
 }
 
 function protectMutations(cookieName: string) {
@@ -242,12 +245,25 @@ export function createApp(dependencies: AppDependencies): Express {
       limit('shared-document-download', config.SHARED_LINK_RATE_LIMIT_MAX, 'ip', 'Demasiados accesos a enlaces compartidos'),
       createPublicSharedDocumentsRouter(dependencies.documents),
     );
+  if (dependencies.collaboration)
+    v1.use(
+      '/share/summaries',
+      limit('public-summary-share', config.SHARED_LINK_RATE_LIMIT_MAX, 'ip', 'Demasiados accesos a enlaces compartidos'),
+      createPublicShareRouter(dependencies.collaboration),
+    );
 
   const authenticated = Router();
   authenticated.use(requireAuth(dependencies.auth, config.COOKIE_NAME));
   authenticated.use(protectMutations(config.COOKIE_NAME));
   const userLimit = (name: string, max: number, message: string): RequestHandler =>
     limit(name, max, 'user', message);
+  if (dependencies.collaboration) {
+    const collaborationWriteLimit = userLimit('collaboration-writes', config.EXPENSE_RATE_LIMIT_MAX, 'Demasiadas acciones de colaboracion; espera un momento');
+    authenticated.use('/calendar', createCalendarRouter(dependencies.collaboration));
+    authenticated.use('/groups', createGroupCollaborationRouter(dependencies.collaboration, { writeLimit: collaborationWriteLimit }));
+    authenticated.use('/groups/:groupId/events', createEventCollaborationRouter(dependencies.collaboration, { writeLimit: collaborationWriteLimit }));
+    authenticated.use('/groups/:groupId/expenses', createExpenseCollaborationRouter(dependencies.collaboration));
+  }
   if (dependencies.personalExpenses) {
     authenticated.use(
       '/expenses',
