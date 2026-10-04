@@ -195,6 +195,8 @@ model User {
   createdRecurringExpenses RecurringExpense[]      @relation("RecurringExpenseCreator")
   notificationPreferences NotificationPreference[]
   incomes                 Income[]
+  contributionRequestsCreated FundContributionRequest[] @relation("FundContributionRequestCreator")
+  achievementRankingVisible Boolean                  @default(true)
 }
 
 /// Credencial desacoplada para permitir otros proveedores sin contaminar User.
@@ -562,6 +564,8 @@ model SettlementTransfer {
   debtorParticipantId   String                  @db.Uuid
   creditorParticipantId String                  @db.Uuid
   amountCents           Int
+  /// Fecha objetiva del pago: fin del evento o inicio si no se definio fin.
+  dueAt                 DateTime?
   status                TransferStatus          @default(PENDING)
   paidAt                DateTime?
   markedPaidById        String?                 @db.Uuid
@@ -609,6 +613,7 @@ model Fund {
   createdBy   User           @relation("FundCreator", fields: [createdById], references: [id], onDelete: Restrict)
   members     FundMember[]
   movements   FundMovement[]
+  contributionRequests FundContributionRequest[]
 
   @@unique([groupId, name])
   @@index([createdById])
@@ -622,6 +627,7 @@ model FundMember {
   joinedAt      DateTime    @default(now())
   fund          Fund        @relation(fields: [fundId], references: [id], onDelete: Cascade)
   groupMember   GroupMember @relation(fields: [groupMemberId], references: [id], onDelete: Cascade)
+  contributionRequestMembers FundContributionRequestMember[]
 
   @@unique([fundId, groupMemberId])
   @@index([groupMemberId])
@@ -636,11 +642,46 @@ model FundMovement {
   description String?          @db.VarChar(500)
   createdById String           @db.Uuid
   createdAt   DateTime         @default(now())
+  contributionRequestMemberId String? @unique @db.Uuid
   fund        Fund             @relation(fields: [fundId], references: [id], onDelete: Cascade)
   createdBy   User             @relation("FundMovementCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  contributionRequestMember FundContributionRequestMember? @relation(fields: [contributionRequestMemberId], references: [id], onDelete: SetNull)
 
   @@index([fundId, createdAt])
   @@index([createdById])
+}
+
+/// Solicitud de aporte creada por un gestor del fondo; los importes son por integrante.
+model FundContributionRequest {
+  id          String   @id @default(uuid()) @db.Uuid
+  fundId      String   @db.Uuid
+  createdById String   @db.Uuid
+  dueAt       DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  fund        Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation("FundContributionRequestCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members     FundContributionRequestMember[]
+
+  @@index([fundId, dueAt])
+  @@index([createdById])
+}
+
+/// Estado individual de una solicitud: se paga al enlazar el movimiento de aporte.
+model FundContributionRequestMember {
+  id           String   @id @default(uuid()) @db.Uuid
+  requestId    String   @db.Uuid
+  fundMemberId String   @db.Uuid
+  amountCents  Int
+  status       String   @default("PENDING") @db.VarChar(16)
+  paidAt       DateTime?
+  request      FundContributionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  fundMember   FundMember @relation(fields: [fundMemberId], references: [id], onDelete: Cascade)
+  paidMovement FundMovement?
+
+  @@unique([requestId, fundMemberId])
+  @@index([fundMemberId, status])
+  @@index([requestId, status])
 }
 
 model Category {
@@ -996,6 +1037,7 @@ model UserAchievement {
   userId        String      @db.Uuid
   achievementId String      @db.Uuid
   awardedAt     DateTime    @default(now())
+  level         String      @default("BRONZE") @db.VarChar(10)
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
 

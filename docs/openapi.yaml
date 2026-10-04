@@ -1117,6 +1117,67 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/groups/{groupId}/funds/{fundId}/contribution-requests:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/FundId'
+    get:
+      tags: [Funds]
+      summary: 'Lista estados de solicitudes de aporte'
+      operationId: listFundContributionRequests
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { enum: [PENDING, PAID, OVERDUE, ALL], default: ALL }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 'Estados por integrante'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/FundContributionRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Funds]
+      summary: 'Crea importes y fecha limite por integrante'
+      operationId: createFundContributionRequest
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FundContributionRequestInput' }
+      responses:
+        '201':
+          {
+            description: 'Solicitud creada',
+            content:
+              { application/json: { schema: { $ref: '#/components/schemas/MutationEnvelope' } } },
+          }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/v1/groups/{groupId}/funds/{fundId}/members/{memberId}:
     parameters:
       - $ref: '#/components/parameters/GroupId'
@@ -3055,6 +3116,92 @@ paths:
                           format: date-time
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/achievements/privacy:
+    get:
+      tags: [Achievements]
+      summary: 'Consulta la visibilidad del ranking'
+      operationId: getAchievementPrivacy
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          {
+            description: 'Preferencia de ranking',
+            content:
+              {
+                application/json:
+                  { schema: { $ref: '#/components/schemas/AchievementPrivacyEnvelope' } },
+              },
+          }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [Achievements]
+      summary: 'Actualiza la visibilidad del ranking'
+      operationId: updateAchievementPrivacy
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AchievementPrivacyInput' }
+      responses:
+        '200':
+          {
+            description: 'Preferencia actualizada',
+            content:
+              {
+                application/json:
+                  { schema: { $ref: '#/components/schemas/AchievementPrivacyEnvelope' } },
+              },
+          }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/groups/{groupId}/achievements/ranking:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Achievements]
+      summary: 'Ranking visible del grupo'
+      operationId: getGroupAchievementRanking
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          {
+            description: 'Ranking',
+            content:
+              {
+                application/json:
+                  { schema: { $ref: '#/components/schemas/AchievementRankingEnvelope' } },
+              },
+          }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/groups/{groupId}/achievements/members:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [Achievements]
+      summary: 'Insignias de miembros del grupo'
+      operationId: getGroupAchievementMembers
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          {
+            description: 'Insignias',
+            content:
+              {
+                application/json:
+                  { schema: { $ref: '#/components/schemas/AchievementMembersEnvelope' } },
+              },
+          }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/privacy/requests:
     get:
       tags: [Privacy]
@@ -4580,6 +4727,7 @@ components:
           canContribute,
           totals,
           members,
+          contributionRequests,
         ]
       properties:
         id:
@@ -4648,6 +4796,10 @@ components:
                     type: string
                   avatarUrl:
                     type: [string, 'null']
+        contributionRequests:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundContributionRequest'
     FundInput:
       type: object
       additionalProperties: false
@@ -4731,6 +4883,46 @@ components:
           type: string
           maxLength: 500
           description: 'Obligatoria (mín. 3) para WITHDRAWAL y ADJUSTMENT.'
+        contributionRequestMemberId:
+          type: string
+          format: uuid
+          description: 'Solicitud de aporte concreta que se está pagando.'
+    FundContributionRequest:
+      type: object
+      required:
+        [id, requestId, dueAt, amountCents, status, paidAt, fundMemberId, groupMemberId, user]
+      properties:
+        id: { type: string, format: uuid }
+        requestId: { type: string, format: uuid }
+        dueAt: { type: string, format: date-time }
+        amountCents: { type: integer, minimum: 1 }
+        status: { enum: [PENDING, PAID, OVERDUE] }
+        paidAt: { type: [string, 'null'], format: date-time }
+        fundMemberId: { type: string, format: uuid }
+        groupMemberId: { type: string, format: uuid }
+        user:
+          type: object
+          required: [id, displayName]
+          properties:
+            id: { type: string, format: uuid }
+            displayName: { type: string }
+    FundContributionRequestInput:
+      type: object
+      additionalProperties: false
+      required: [dueAt, members]
+      properties:
+        dueAt: { type: string, format: date-time }
+        members:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [fundMemberId, amountCents]
+            properties:
+              fundMemberId: { type: string, format: uuid }
+              amountCents: { type: integer, minimum: 1, maximum: 2147483647 }
     Budget:
       type: object
       required:
@@ -5739,6 +5931,11 @@ components:
               privacy.updated,
               achievement.unlocked,
               event.reminder,
+              document.expiring,
+              document.expired,
+              recurring.expense,
+              fund.contribution_due,
+              fund.contribution_overdue,
             ]
         title:
           type: string
@@ -5775,6 +5972,11 @@ components:
               privacy.updated,
               achievement.unlocked,
               event.reminder,
+              document.expiring,
+              document.expired,
+              recurring.expense,
+              fund.contribution_due,
+              fund.contribution_overdue,
             ]
         inApp:
           type: boolean
@@ -5790,7 +5992,7 @@ components:
         preferences:
           type: array
           minItems: 1
-          maxItems: 9
+          maxItems: 15
           items: { $ref: '#/components/schemas/NotificationPreference' }
     NotificationPreferencesEnvelope:
       type: object
@@ -5842,7 +6044,20 @@ components:
               pattern: '^[A-Za-z0-9_-]+$'
     Achievement:
       type: object
-      required: [code, name, description, category, target, progress, status, awardedAt]
+      required:
+        [
+          code,
+          name,
+          description,
+          category,
+          target,
+          progress,
+          status,
+          awardedAt,
+          currentLevel,
+          points,
+          levels,
+        ]
       properties:
         code:
           type: string
@@ -5861,6 +6076,100 @@ components:
         awardedAt:
           type: [string, 'null']
           format: date-time
+        metric:
+          type: string
+        currentLevel:
+          enum: [BRONZE, SILVER, GOLD, null]
+        points:
+          type: integer
+        levels:
+          type: array
+          items:
+            type: object
+            required: [level, threshold, points, achieved]
+            properties:
+              level:
+                enum: [BRONZE, SILVER, GOLD]
+              threshold:
+                type: integer
+              points:
+                type: integer
+              achieved:
+                type: boolean
+    AchievementPrivacy:
+      type: object
+      required: [rankingVisible]
+      properties:
+        rankingVisible:
+          type: boolean
+    AchievementPrivacyInput:
+      type: object
+      additionalProperties: false
+      required: [rankingVisible]
+      properties:
+        rankingVisible:
+          type: boolean
+    AchievementBadge:
+      type: object
+      required: [code, name, level, points]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        level: { enum: [BRONZE, SILVER, GOLD] }
+        points: { type: integer }
+    AchievementRanking:
+      type: array
+      items:
+        type: object
+        required: [rank, user, points, badges]
+        properties:
+          rank: { type: integer }
+          points: { type: integer }
+          user:
+            type: object
+            required: [id, displayName, avatarUrl]
+            properties:
+              id: { type: string, format: uuid }
+              displayName: { type: string }
+              avatarUrl: { type: [string, 'null'] }
+          badges:
+            type: array
+            items: { $ref: '#/components/schemas/AchievementBadge' }
+    AchievementMembers:
+      type: array
+      items:
+        type: object
+        required: [user, points, badges]
+        properties:
+          points: { type: integer }
+          user:
+            type: object
+            required: [id, displayName, avatarUrl]
+            properties:
+              id: { type: string, format: uuid }
+              displayName: { type: string }
+              avatarUrl: { type: [string, 'null'] }
+          badges:
+            type: array
+            items: { $ref: '#/components/schemas/AchievementBadge' }
+    AchievementPrivacyEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data: { $ref: '#/components/schemas/AchievementPrivacy' }
+    AchievementRankingEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data: { $ref: '#/components/schemas/AchievementRanking' }
+    AchievementMembersEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data: { $ref: '#/components/schemas/AchievementMembers' }
     PrivacyRequest:
       type: object
       required:

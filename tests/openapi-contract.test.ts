@@ -42,6 +42,10 @@ const EXTRA_ROUTERS: Array<{
     prefix: '/groups/:groupId/recurring-expenses',
     from: 'export function createGroupRecurringRouter',
   },
+  {
+    relativePath: 'achievements/achievements-group.router.ts',
+    prefix: '/groups/:groupId/achievements',
+  },
 ];
 
 function normalize(route: string) {
