@@ -3,7 +3,13 @@ import { requestHash } from '../../shared/crypto.js';
 import { AppError, ensure } from '../../shared/errors.js';
 import type { DomainEvents } from '../../shared/events.js';
 import type { GroupsService } from '../groups/groups.service.js';
-import type { CreateFundInput, CreateMovementInput, UpdateFundInput } from './funds.schema.js';
+import type {
+  ContributionRequestsQuery,
+  CreateContributionRequestInput,
+  CreateFundInput,
+  CreateMovementInput,
+  UpdateFundInput,
+} from './funds.schema.js';
 import type { FundsRepository } from './funds.repository.js';
 
 const ALL_ROLES = [GroupRole.OWNER, GroupRole.ADMIN, GroupRole.MEMBER] as const;
@@ -110,6 +116,12 @@ export class FundsService {
       this.repository.detail(fundId),
       this.repository.balances([fundId]),
     ]);
+    await this.repository.markOverdue(new Date());
+    const contributionRequests = await this.repository.contributionRequestMembers(
+      fundId,
+      'ALL',
+      100,
+    );
     const byType = Object.fromEntries(
       Object.values(FundMovementType).map((type) => {
         const row = totals.find((total) => total.type === type);
@@ -150,7 +162,90 @@ export class FundsService {
         groupMemberId: member.groupMember.id,
         user: member.groupMember.user,
       })),
+      contributionRequests: contributionRequests.map((item) => ({
+        id: item.id,
+        requestId: item.request.id,
+        dueAt: item.request.dueAt,
+        amountCents: item.amountCents,
+        status: item.status,
+        paidAt: item.paidAt,
+        fundMemberId: item.fundMember.id,
+        groupMemberId: item.fundMember.groupMemberId,
+        user: item.fundMember.groupMember.user,
+      })),
     };
+  }
+
+  async createContributionRequest(
+    userId: string,
+    groupId: string,
+    fundId: string,
+    input: CreateContributionRequestInput,
+    requestId: string,
+  ) {
+    const context = await this.requireManage(userId, groupId, fundId);
+    ensure(!context.fund.archivedAt, 409, 'FUND_ARCHIVED', 'El fondo esta archivado');
+    const dueAt = new Date(input.dueAt);
+    ensure(
+      dueAt.getTime() > Date.now(),
+      422,
+      'CONTRIBUTION_DUE_DATE_INVALID',
+      'La fecha limite debe estar en el futuro',
+    );
+    ensure(
+      dueAt.getTime() <= Date.now() + 366 * 24 * 60 * 60 * 1000,
+      422,
+      'CONTRIBUTION_DUE_DATE_TOO_FAR',
+      'La fecha limite no puede superar un ano',
+    );
+    const memberIds = input.members.map((member) => member.fundMemberId);
+    ensure(
+      new Set(memberIds).size === memberIds.length,
+      422,
+      'DUPLICATE_FUND_MEMBER',
+      'No repitas integrantes en una solicitud',
+    );
+    const found = await this.repository.fundMembers(fundId, memberIds);
+    ensure(
+      found.length === memberIds.length,
+      422,
+      'FUND_MEMBER_NOT_FOUND',
+      'Un integrante no pertenece al fondo',
+    );
+    return this.repository.createContributionRequest({
+      fundId,
+      createdById: userId,
+      dueAt,
+      members: input.members,
+      requestId,
+    });
+  }
+
+  async contributionRequests(
+    userId: string,
+    groupId: string,
+    fundId: string,
+    query: ContributionRequestsQuery,
+  ) {
+    await this.access(userId, groupId, fundId);
+    await this.repository.markOverdue(new Date());
+    const rows = await this.repository.contributionRequestMembers(
+      fundId,
+      query.status,
+      query.limit,
+    );
+    return rows.map((item) => ({
+      id: item.id,
+      requestId: item.request.id,
+      dueAt: item.request.dueAt,
+      createdAt: item.request.createdAt,
+      amountCents: item.amountCents,
+      status: item.status,
+      paidAt: item.paidAt,
+      fundMemberId: item.fundMember.id,
+      groupMemberId: item.fundMember.groupMemberId,
+      user: item.fundMember.groupMember.user,
+    }));
   }
 
   async update(userId: string, groupId: string, fundId: string, input: UpdateFundInput) {
@@ -287,6 +382,7 @@ export class FundsService {
     requestId: string,
   ) {
     const context = await this.access(userId, groupId, fundId);
+    let contributionRequestMemberId: string | undefined;
     if (input.type === 'CONTRIBUTION') {
       ensure(
         !context.fund.archivedAt &&
@@ -295,6 +391,39 @@ export class FundsService {
         'FUND_FORBIDDEN',
         'No tienes permiso para aportar a este fondo',
       );
+      ensure(context.fundMember, 403, 'FUND_FORBIDDEN', 'Solo miembros del fondo pueden aportar');
+      if (input.contributionRequestMemberId) {
+        const requestMember = await this.repository.requestMember(
+          fundId,
+          input.contributionRequestMemberId,
+        );
+        ensure(
+          requestMember && requestMember.fundMemberId === context.fundMember.id,
+          404,
+          'CONTRIBUTION_REQUEST_NOT_FOUND',
+          'Solicitud de aporte no encontrada',
+        );
+        ensure(
+          requestMember.status === 'PENDING' || requestMember.status === 'OVERDUE',
+          409,
+          'CONTRIBUTION_REQUEST_PAID',
+          'El aporte solicitado ya fue registrado',
+        );
+        ensure(
+          requestMember.amountCents === input.amountCents,
+          422,
+          'CONTRIBUTION_AMOUNT_MISMATCH',
+          'El aporte no coincide con el importe solicitado',
+        );
+        contributionRequestMemberId = requestMember.id;
+      } else {
+        const matching = await this.repository.openRequestMemberForUser(
+          fundId,
+          userId,
+          input.amountCents,
+        );
+        contributionRequestMemberId = matching?.id;
+      }
     } else if (input.type === 'WITHDRAWAL') {
       ensure(
         this.policyAllows(context.fund.withdrawalPolicy ?? FundAccessPolicy.MANAGERS, context.membership.role, context.fundMember?.role ?? null),
@@ -326,6 +455,7 @@ export class FundsService {
       key,
       requestHash: hash,
       requestId,
+      ...(contributionRequestMemberId ? { contributionRequestMemberId } : {}),
     });
     ensure(result.outcome !== 'NOT_FOUND', 404, 'FUND_NOT_FOUND', 'Fondo no encontrado');
     ensure(result.outcome !== 'ARCHIVED', 409, 'FUND_ARCHIVED', 'El fondo esta archivado');

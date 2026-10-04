@@ -41,6 +41,8 @@ const DEFAULTS: Record<NotificationType, { inApp: boolean; email: boolean; push:
   'event.reminder': { inApp: true, email: false, push: false },
   'recurring.expense': { inApp: true, email: true, push: false },
   'event.comment': { inApp: true, email: false, push: false },
+  'fund.contribution_due': { inApp: true, email: false, push: false },
+  'fund.contribution_overdue': { inApp: true, email: true, push: false },
 };
 
 export interface NotifyInput {

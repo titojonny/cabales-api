@@ -348,6 +348,18 @@ Los fondos tienen políticas `ANY_MEMBER`, `MANAGERS` o `GROUP_ADMINS` para apor
 
 No hay variables de entorno nuevas en P8. La verificación específica debe ejecutar las pruebas unitarias y de integración con PostgreSQL/Redis reales, además de las pruebas de app y E2E; esta rama no ejecuta `tsc`, Vitest, Vite build, Prisma generate ni Playwright por la restricción del sandbox.
 
+## P6: aportes y logros sociales
+
+La migracion `20261004060000_p6_aportes_logros` añade solicitudes de aporte por integrante (`PENDING|PAID|OVERDUE`), fecha limite y enlace idempotente con el movimiento que las paga. `POST /groups/:groupId/funds/:fundId/contribution-requests` requiere gestor del fondo; el aporte puede indicar `contributionRequestMemberId` y el servicio comprueba que pertenece a la persona autenticada y que el importe coincide.
+
+El job `fund-contribution-reminders` usa una ventana de 24 horas para `fund.contribution_due`, marca pendientes vencidos y emite `fund.contribution_overdue`. Las claves por integrante y tipo pasan por la deduplicacion persistente de `Notification`, por lo que las preferencias in-app apagadas no provocan reenvios de correo o push. Los avisos de eventos y documentos existentes ya comparten el mismo camino de push y preferencia.
+
+El catalogo conserva los logros anteriores y añade Siempre paga, El mas puntual, Rey de las cabudas, Organizador profesional, Companero ejemplar y Solo por diversion. Cada uno expone umbrales Bronce/Plata/Oro y puntos 1/2/3; el progreso se calcula desde transferencias, fechas limite, RSVP, cierres, eventos sin gastos, aportes y movimientos persistidos. `GET /achievements` tambien sirve de perfil de insignias; `GET /groups/:groupId/achievements/ranking` y `/members` solo funcionan para integrantes del grupo. `GET|PUT /achievements/privacy` controla la visibilidad individual en el ranking.
+
+Los umbrales P6 son, en orden Bronce/Plata/Oro: Siempre paga 1/5/15, El mas puntual 1/5/15, Rey de las cabudas 1/5/15, Organizador profesional 1/3/10, Companero ejemplar 1/5/15 y Solo por diversion 1/3/10.
+
+Los agregados de logros se cachean 60 segundos por usuario para evitar consultas repetidas en rankings; el bus de eventos invalida la caché antes de recalcular actividad.
+
 ## Principios aplicados
 
 El contrato OpenAPI de P4 se comprueba contra todas las operaciones montadas, incluidos los routers personales separados y las acciones de pausa, reanudacion y borrado de recurrentes. No se documentan rutas personales que no esten montadas.

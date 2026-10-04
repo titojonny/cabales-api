@@ -19,6 +19,7 @@ import {
 import type { LocalFileStorageProvider } from '../infrastructure/storage.js';
 import type { AchievementsService } from '../modules/achievements/achievements.service.js';
 import { createAchievementsRouter } from '../modules/achievements/achievements.router.js';
+import { createGroupAchievementsRouter } from '../modules/achievements/achievements-group.router.js';
 import type { AuthPort } from '../modules/auth/auth.service.js';
 import { createAuthRouter } from '../modules/auth/auth.router.js';
 import type { BudgetsService } from '../modules/budgets/budgets.service.js';
@@ -314,7 +315,15 @@ export function createApp(dependencies: AppDependencies): Express {
     createSettlementsRouter(dependencies.settlements),
   );
   if (dependencies.funds)
-    authenticated.use('/groups/:groupId/funds', createFundsRouter(dependencies.funds));
+    authenticated.use(
+      '/groups/:groupId/funds',
+      userLimit(
+        'fund-contribution-requests',
+        config.EXPENSE_RATE_LIMIT_MAX,
+        'Demasiadas operaciones de fondos; espera un momento',
+      ),
+      createFundsRouter(dependencies.funds),
+    );
   if (dependencies.budgets)
     authenticated.use('/groups/:groupId/budgets', createBudgetsRouter(dependencies.budgets));
   if (dependencies.privacy) {
@@ -392,7 +401,25 @@ export function createApp(dependencies: AppDependencies): Express {
     authenticated.use('/notifications', createNotificationsRouter(dependencies.notifications));
   }
   if (dependencies.achievements)
-    authenticated.use('/achievements', createAchievementsRouter(dependencies.achievements));
+    authenticated.use(
+      '/achievements',
+      userLimit(
+        'achievements',
+        config.EXPENSE_RATE_LIMIT_MAX,
+        'Demasiadas consultas de logros; espera un momento',
+      ),
+      createAchievementsRouter(dependencies.achievements),
+    );
+  if (dependencies.achievements)
+    authenticated.use(
+      '/groups/:groupId/achievements',
+      userLimit(
+        'group-achievements',
+        config.EXPENSE_RATE_LIMIT_MAX,
+        'Demasiadas consultas de logros; espera un momento',
+      ),
+      createGroupAchievementsRouter(dependencies.achievements),
+    );
   v1.use(authenticated);
   app.use('/api/v1', v1);
   app.use(notFound);

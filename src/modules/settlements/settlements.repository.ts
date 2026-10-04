@@ -18,6 +18,7 @@ const settlementDetail = {
       debtorParticipantId: true,
       creditorParticipantId: true,
       amountCents: true,
+      dueAt: true,
       status: true,
       paidAt: true,
       debtor: { select: { guestName: true, groupMemberId: true } },
@@ -97,6 +98,8 @@ export class SettlementsRepository {
               where: { id: input.eventId, groupId: input.groupId },
               select: {
                 status: true,
+                startsAt: true,
+                endsAt: true,
                 settlement: { select: { id: true } },
                 expenses: { select: { id: true }, orderBy: { id: 'asc' } },
               },
@@ -121,6 +124,7 @@ export class SettlementsRepository {
                 transfers: {
                   create: input.transfers.map((transfer) => ({
                     ...transfer,
+                    dueAt: event.endsAt ?? event.startsAt,
                     history: {
                       create: { toStatus: TransferStatus.PENDING, changedById: input.userId },
                     },

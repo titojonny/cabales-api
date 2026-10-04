@@ -624,6 +624,7 @@ describe.skipIf(!TEST_DATABASE_URL)('Integración PostgreSQL: flujo completo de 
       FIRST_EVENT: 'UNLOCKED',
       FIRST_EXPENSE: 'UNLOCKED',
       FIRST_CLOSE: 'UNLOCKED',
+      PRO_ORGANIZER: 'UNLOCKED',
       EVENT_PLANNER: 'IN_PROGRESS',
       RELIABLE_PAYER: 'LOCKED',
     });
@@ -631,7 +632,7 @@ describe.skipIf(!TEST_DATABASE_URL)('Integración PostgreSQL: flujo completo de 
     await drain();
     expect(
       await ctx.db.userAchievement.count({ where: { user: { email: 'ana@example.com' } } }),
-    ).toBe(4);
+    ).toBe(5);
     const bobAchievements = await bob.get('/achievements/history');
     expect(bobAchievements.body.data.map((a: { code: string }) => a.code)).toContain('GOOD_PAYER');
     const unread = await ana.get('/notifications/unread-count');

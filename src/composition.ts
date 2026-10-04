@@ -56,6 +56,7 @@ import { ExpensesService } from './modules/expenses/expenses.service.js';
 import { PersonalExpensesService } from './modules/expenses/personal-expenses.service.js';
 import { FundsRepository } from './modules/funds/funds.repository.js';
 import { FundsService } from './modules/funds/funds.service.js';
+import { FundContributionRemindersService } from './modules/funds/fund-contribution-reminders.service.js';
 import { GroupsRepository } from './modules/groups/groups.repository.js';
 import { GroupsService } from './modules/groups/groups.service.js';
 import { NotificationsService } from './modules/notifications/notifications.service.js';
@@ -219,6 +220,12 @@ export function createContainer(
     appOrigin: config.APP_ORIGIN,
     notifications,
   });
+  const fundsRepository = new FundsRepository(db);
+  const funds = new FundsService(fundsRepository, groups, domainEvents);
+  const fundContributionReminders = new FundContributionRemindersService(
+    fundsRepository,
+    notifications,
+  );
   const recurringExpenses = new RecurringExpensesService(db, groups, notifications, domainEvents);
   const eventReminders = new EventRemindersService(eventsRepository, notifications);
   const scheduler = new TaskScheduler({
@@ -246,6 +253,12 @@ export function createContainer(
     intervalMs: config.SCHEDULER_INTERVAL_SECONDS * 1000,
     lockTtlMs: config.SCHEDULER_LOCK_TTL_SECONDS * 1000,
     run: ({ now }) => documents.runExpiryNotifications(now, notifications),
+  });
+  scheduler.register({
+    name: 'fund-contribution-reminders',
+    intervalMs: config.SCHEDULER_INTERVAL_SECONDS * 1000,
+    lockTtlMs: config.SCHEDULER_LOCK_TTL_SECONDS * 1000,
+    run: ({ now }) => fundContributionReminders.run(now),
   });
   const achievements = new AchievementsService(db, notifications);
   domainEvents.subscribe((event) => notifications.handle(event));
@@ -277,7 +290,7 @@ export function createContainer(
       maxAttempts: config.OCR_MAX_ATTEMPTS,
       events: domainEvents,
     }),
-    funds: new FundsService(new FundsRepository(db), groups, domainEvents),
+    funds,
     budgets,
     cabudas: new CabudasService(db),
     statistics: new StatisticsService(db, budgets, budgetsRepository),

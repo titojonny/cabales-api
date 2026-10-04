@@ -10,13 +10,17 @@ import {
 } from '../../shared/validation.js';
 import {
   addFundMemberSchema,
+  contributionRequestsQuerySchema,
+  createContributionRequestSchema,
   createFundSchema,
   createMovementSchema,
   movementsQuerySchema,
   updateFundMemberSchema,
   updateFundSchema,
   type CreateFundInput,
+  type CreateContributionRequestInput,
   type CreateMovementInput,
+  type ContributionRequestsQuery,
   type UpdateFundInput,
 } from './funds.schema.js';
 import type { FundsService } from './funds.service.js';
@@ -59,6 +63,38 @@ export function createFundsRouter(service: FundsService): Router {
   router.post('/:fundId/archive', async (req, res) => {
     sendData(res, await service.archive(req.auth!.userId, groupParam(req), fund(req.params)));
   });
+  router.post(
+    '/:fundId/contribution-requests',
+    validateBody(createContributionRequestSchema),
+    async (req, res) => {
+      sendData(
+        res,
+        await service.createContributionRequest(
+          req.auth!.userId,
+          groupParam(req),
+          fund(req.params),
+          req.body as CreateContributionRequestInput,
+          req.requestId,
+        ),
+        201,
+      );
+    },
+  );
+  router.get(
+    '/:fundId/contribution-requests',
+    validateQuery(contributionRequestsQuerySchema),
+    async (req, res) => {
+      sendData(
+        res,
+        await service.contributionRequests(
+          req.auth!.userId,
+          groupParam(req),
+          fund(req.params),
+          req.validatedQuery as ContributionRequestsQuery,
+        ),
+      );
+    },
+  );
   router.post('/:fundId/members', validateBody(addFundMemberSchema), async (req, res) => {
     sendData(
       res,
