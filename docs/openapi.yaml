@@ -3316,6 +3316,107 @@ paths:
       - { name: recurringId, in: path, required: true, schema: { type: string, format: uuid } }
     post: { summary: Reanudar recurrente del grupo, responses: { '200': { description: Actualizado } } }
 
+  /api/v1/groups/{groupId}/share-links:
+    get:
+      operationId: listPublicShareLinks
+      tags: [Groups]
+      parameters: [{ $ref: '#/components/parameters/GroupId' }]
+      responses: { '200': { description: Enlaces de resumen del grupo } }
+    post:
+      operationId: createPublicShareLink
+      tags: [Groups]
+      parameters: [{ $ref: '#/components/parameters/GroupId' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PublicShareLinkInput' } } } }
+      responses: { '201': { description: Enlace creado } }
+  /api/v1/groups/{groupId}/share-links/{linkId}/revoke:
+    post:
+      operationId: revokePublicShareLink
+      tags: [Groups]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: linkId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Enlace revocado } }
+  /api/v1/share/summaries/{token}:
+    get:
+      operationId: getPublicSummary
+      tags: [Groups]
+      parameters: [{ name: token, in: path, required: true, schema: { type: string, minLength: 40, maxLength: 64 } }]
+      responses: { '200': { description: Resumen público sin datos sensibles } }
+  /api/v1/calendar/events:
+    get:
+      operationId: listCalendarEvents
+      tags: [Events]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+      responses: { '200': { description: Eventos de los grupos del usuario } }
+  /api/v1/groups/{groupId}/events/{eventId}/repeat-template:
+    get:
+      operationId: repeatEventTemplate
+      tags: [Events]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Plantilla editable de evento } }
+  /api/v1/groups/{groupId}/events/{eventId}/comments:
+    get:
+      operationId: listEventComments
+      tags: [Events]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Hilo de comentarios } }
+    post:
+      operationId: createEventComment
+      tags: [Events]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EventCommentInput' } } } }
+      responses: { '201': { description: Comentario creado } }
+  /api/v1/groups/{groupId}/events/{eventId}/comments/{commentId}:
+    patch:
+      operationId: updateEventComment
+      tags: [Events]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: commentId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EventCommentInput' } } } }
+      responses: { '200': { description: Comentario actualizado } }
+    delete:
+      operationId: deleteEventComment
+      tags: [Events]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: commentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Comentario borrado } }
+  /api/v1/groups/{groupId}/events/{eventId}/funds:
+    get:
+      operationId: listEventFunds
+      tags: [Events, Funds]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Fondos vinculados y saldos derivados } }
+    put:
+      operationId: replaceEventFunds
+      tags: [Events, Funds]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EventFundsInput' } } } }
+      responses: { '200': { description: Fondos vinculados actualizados } }
+  /api/v1/groups/{groupId}/expenses/{expenseId}/repeat-template:
+    get:
+      operationId: repeatExpenseTemplate
+      tags: [Expenses]
+      parameters:
+        - { $ref: '#/components/parameters/GroupId' }
+        - { name: expenseId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Plantilla editable de gasto } }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -3574,6 +3675,25 @@ components:
         content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } },
       }
   schemas:
+    PublicShareLinkInput:
+      type: object
+      additionalProperties: false
+      properties:
+        eventId: { type: string, format: uuid }
+        settlementId: { type: string, format: uuid }
+        expiresInDays: { type: integer, minimum: 1, maximum: 30, default: 30 }
+    EventCommentInput:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 2000 }
+    EventFundsInput:
+      type: object
+      additionalProperties: false
+      required: [fundIds]
+      properties:
+        fundIds: { type: array, maxItems: 50, items: { type: string, format: uuid } }
     SuccessEnvelope:
       type: object
       required: [success, data]
@@ -4529,6 +4649,10 @@ components:
           balanceCents,
           myRole,
           canManage,
+          contributionPolicy,
+          withdrawalPolicy,
+          closingPolicy,
+          withdrawalLimitCents,
         ]
       properties:
         id:
@@ -4558,6 +4682,14 @@ components:
           enum: [MANAGER, MEMBER, null]
         canManage:
           type: boolean
+        contributionPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        withdrawalPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        closingPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        withdrawalLimitCents:
+          type: [integer, 'null']
         memberCount:
           type: integer
         movementCount:
@@ -4578,6 +4710,12 @@ components:
           myRole,
           canManage,
           canContribute,
+          canWithdraw,
+          canClose,
+          contributionPolicy,
+          withdrawalPolicy,
+          closingPolicy,
+          withdrawalLimitCents,
           totals,
           members,
         ]
@@ -4611,6 +4749,18 @@ components:
           type: boolean
         canContribute:
           type: boolean
+        canWithdraw:
+          type: boolean
+        canClose:
+          type: boolean
+        contributionPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        withdrawalPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        closingPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        withdrawalLimitCents:
+          type: [integer, 'null']
         totals:
           type: object
           additionalProperties:
@@ -4667,6 +4817,18 @@ components:
             type: string
             format: uuid
           description: 'Identificadores de miembros del grupo.'
+        contributionPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+          default: ANY_MEMBER
+        withdrawalPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+          default: MANAGERS
+        closingPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+          default: MANAGERS
+        withdrawalLimitCents:
+          type: [integer, 'null']
+          minimum: 1
     FundPatch:
       type: object
       additionalProperties: false
@@ -4679,6 +4841,15 @@ components:
         description:
           type: [string, 'null']
           maxLength: 500
+        contributionPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        withdrawalPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        closingPolicy:
+          enum: [ANY_MEMBER, MANAGERS, GROUP_ADMINS]
+        withdrawalLimitCents:
+          type: [integer, 'null']
+          minimum: 1
       minProperties: 1
     FundMemberInput:
       type: object

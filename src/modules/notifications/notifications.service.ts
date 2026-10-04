@@ -40,6 +40,7 @@ const DEFAULTS: Record<NotificationType, { inApp: boolean; email: boolean; push:
   'achievement.unlocked': { inApp: true, email: false, push: false },
   'event.reminder': { inApp: true, email: false, push: false },
   'recurring.expense': { inApp: true, email: true, push: false },
+  'event.comment': { inApp: true, email: false, push: false },
 };
 
 export interface NotifyInput {

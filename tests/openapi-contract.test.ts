@@ -73,6 +73,7 @@ function implementedRoutes() {
     } catch {
       continue;
     }
+    if (dir === 'collaboration') continue;
     const prefix = MOUNTS[dir];
     expect(prefix, `Router sin prefijo conocido: ${dir}`).toBeDefined();
     if (prefix === undefined) continue;
@@ -82,6 +83,19 @@ function implementedRoutes() {
     const source = readFileSync(path.join(modules, extra.relativePath), 'utf8');
     const scopedSource = extra.from ? source.slice(source.indexOf(extra.from)) : source;
     collectRoutes(routes, scopedSource, extra.prefix);
+  }
+  const collaboration = readFileSync(path.join(modules, 'collaboration', 'collaboration.router.ts'), 'utf8');
+  const collaborationRouters: Array<[string, string]> = [
+    ['createGroupCollaborationRouter', '/groups'],
+    ['createEventCollaborationRouter', '/groups/:groupId/events'],
+    ['createExpenseCollaborationRouter', '/groups/:groupId/expenses'],
+    ['createPublicShareRouter', '/share/summaries'],
+    ['createCalendarRouter', '/calendar'],
+  ];
+  for (const [name, prefix] of collaborationRouters) {
+    const start = collaboration.indexOf(`export function ${name}`);
+    const next = collaboration.indexOf('\nexport function ', start + 1);
+    collectRoutes(routes, collaboration.slice(start, next < 0 ? collaboration.length : next), prefix);
   }
   const sharedRouter = readFileSync(
     path.join(modules, 'documents', 'document-shared.router.ts'),

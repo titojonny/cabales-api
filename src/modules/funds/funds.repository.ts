@@ -13,6 +13,10 @@ const fundView = {
   archivedAt: true,
   createdAt: true,
   updatedAt: true,
+  contributionPolicy: true,
+  withdrawalPolicy: true,
+  closingPolicy: true,
+  withdrawalLimitCents: true,
 } as const;
 
 const movementView = {
@@ -47,6 +51,10 @@ export class FundsRepository {
     description?: string | undefined;
     currency: string;
     memberIds: string[];
+    contributionPolicy: 'ANY_MEMBER' | 'MANAGERS' | 'GROUP_ADMINS';
+    withdrawalPolicy: 'ANY_MEMBER' | 'MANAGERS' | 'GROUP_ADMINS';
+    closingPolicy: 'ANY_MEMBER' | 'MANAGERS' | 'GROUP_ADMINS';
+    withdrawalLimitCents?: number | null;
     requestId: string;
   }) {
     return this.db.$transaction(async (tx) => {
@@ -56,6 +64,10 @@ export class FundsRepository {
           name: input.name,
           currency: input.currency,
           createdById: input.userId,
+          contributionPolicy: input.contributionPolicy,
+          withdrawalPolicy: input.withdrawalPolicy,
+          closingPolicy: input.closingPolicy,
+          withdrawalLimitCents: input.withdrawalLimitCents ?? null,
           ...(input.description ? { description: input.description } : {}),
           members: {
             create: [

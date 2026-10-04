@@ -184,7 +184,10 @@ export function createLimiter(options: {
     ...(store ? { store } : {}),
     skip: (req) => options.key === 'email' && !emailKey(req),
     keyGenerator: (req) => {
-      const endpoint = `${req.baseUrl}${req.path}`;
+      const endpoint = `${req.baseUrl}${req.path}`.replace(
+        /\/share\/(?:summaries|documents)\/[A-Za-z0-9_-]+$/,
+        (value) => `${value.split('/').slice(0, -1).join('/')}/:token`,
+      );
       if (options.key === 'user' && req.auth?.userId) return `u:${req.auth.userId}`;
       if (options.key === 'email') return `e:${endpoint}:${emailKey(req)}`;
       return `ip:${ipKeyGenerator(req.ip ?? '0.0.0.0')}`;

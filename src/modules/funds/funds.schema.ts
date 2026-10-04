@@ -6,6 +6,10 @@ export const createFundSchema = z
     name: z.string().trim().min(2).max(120),
     description: z.string().trim().max(500).optional(),
     memberIds: z.array(z.string().uuid()).max(100).default([]),
+    contributionPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).default('ANY_MEMBER'),
+    withdrawalPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).default('MANAGERS'),
+    closingPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).default('MANAGERS'),
+    withdrawalLimitCents: z.number().int().positive().max(MAX_MONEY_CENTS).nullable().optional(),
   })
   .strict();
 
@@ -13,6 +17,10 @@ export const updateFundSchema = z
   .object({
     name: z.string().trim().min(2).max(120).optional(),
     description: z.string().trim().max(500).nullable().optional(),
+    contributionPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).optional(),
+    withdrawalPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).optional(),
+    closingPolicy: z.enum(['ANY_MEMBER', 'MANAGERS', 'GROUP_ADMINS']).optional(),
+    withdrawalLimitCents: z.number().int().positive().max(MAX_MONEY_CENTS).nullable().optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un cambio');
