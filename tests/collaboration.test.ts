@@ -170,6 +170,7 @@ describe('P8 colaboración', () => {
       withdrawalLimitCents: 100,
     };
     const repository = {
+      findIdempotency: async () => null,
       find: async () => baseFund,
       fundMember: async () => ({
         id: '00000000-0000-4000-8000-000000000005',

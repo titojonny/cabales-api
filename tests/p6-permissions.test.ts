@@ -1,5 +1,6 @@
 import { FundRole, GroupRole } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
+import { requestHash } from '../src/shared/crypto.js';
 import { AchievementsService } from '../src/modules/achievements/achievements.service.js';
 import { FundsService } from '../src/modules/funds/funds.service.js';
 
@@ -72,6 +73,18 @@ describe('permisos y privacidad de P6', () => {
     const visibleUser = '40000000-0000-4000-8000-000000000004';
     const hiddenUser = '50000000-0000-4000-8000-000000000005';
     const groupMember = vi.fn(async (args: { where: Record<string, unknown> }) => {
+      if (args.where.groupId === groupId && args.where.OR)
+        return [
+          {
+            userId: visibleUser,
+            user: {
+              id: visibleUser,
+              displayName: 'Visible',
+              avatarUrl: null,
+              achievementRankingVisible: true,
+            },
+          },
+        ];
       if (args.where.groupId === groupId)
         return [
           {
@@ -125,5 +138,47 @@ describe('permisos y privacidad de P6', () => {
     await expect(service.ranking(userId, groupId)).resolves.toEqual([
       expect.objectContaining({ user: expect.objectContaining({ id: visibleUser }) }),
     ]);
+    await expect(service.members(userId, groupId)).resolves.toEqual([
+      expect.objectContaining({ user: expect.objectContaining({ id: visibleUser }) }),
+    ]);
+  });
+
+  it('reproduce un movimiento idempotente aunque la solicitud ya aparezca pagada', async () => {
+    const input = {
+      type: 'CONTRIBUTION' as const,
+      amountCents: 1000,
+      contributionRequestMemberId: 'request-member-id',
+    };
+    const replayData = { movement: { id: 'movement-id' }, balanceCents: 1000 };
+    const repository = {
+      find: vi.fn(async () => ({
+        id: fundId,
+        groupId,
+        archivedAt: null,
+        contributionPolicy: 'ANY_MEMBER',
+      })),
+      fundMember: vi.fn(async () => ({ id: 'fund-member', role: FundRole.MEMBER })),
+      findIdempotency: vi.fn(async () => ({
+        requestHash: requestHash(input),
+        responseBody: replayData,
+      })),
+      requestMember: vi.fn(async () => {
+        throw new Error('no debe volver a validar una solicitud pagada');
+      }),
+    };
+    const groups = {
+      requireRole: vi.fn(async () => ({
+        id: 'group-member',
+        groupId,
+        userId,
+        role: GroupRole.MEMBER,
+      })),
+    };
+    const service = new FundsService(repository as never, groups as never);
+
+    await expect(
+      service.createMovement(userId, groupId, fundId, input, 'same-key', 'request-id'),
+    ).resolves.toEqual({ data: replayData, replayed: true });
+    expect(repository.requestMember).not.toHaveBeenCalled();
   });
 });

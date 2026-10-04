@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config/env.js';
 import { createLogger } from '../src/config/logger.js';
 import { createApp } from '../src/http/app.js';
+import { createAuthRouter } from '../src/modules/auth/auth.router.js';
 import { createDocumentsRouter } from '../src/modules/documents/documents.router.js';
 import type { DocumentsService } from '../src/modules/documents/documents.service.js';
 import type { DocumentLockService } from '../src/modules/documents/document-lock.service.js';
@@ -18,6 +19,7 @@ import { createPrivacyRouter } from '../src/modules/privacy/privacy.router.js';
 import type { PrivacyService } from '../src/modules/privacy/privacy.service.js';
 import type { SettlementsService } from '../src/modules/settlements/settlements.service.js';
 import { hashToken } from '../src/shared/crypto.js';
+import cookieParser from 'cookie-parser';
 
 const base = { DATABASE_URL: 'postgresql://fake:fake@localhost:5432/fake' };
 
@@ -122,9 +124,7 @@ describe('limites de rutas sensibles', () => {
       '/documents',
       createDocumentsRouter(documents, { maxBytes: 1024, pinLimit: limited, lock }),
     );
-    const pinResponse = await request(pinApp)
-      .post('/documents/lock/pin')
-      .send({ pin: '123456' });
+    const pinResponse = await request(pinApp).post('/documents/lock/pin').send({ pin: '123456' });
     expect(pinResponse.status).toBe(429);
     expect(lock.unlockPin).not.toHaveBeenCalled();
 
@@ -184,6 +184,50 @@ describe('HTTP transversal', () => {
 });
 
 describe('HTTP auth aislado', () => {
+  it('liga el callback OAuth de vinculacion a la sesion que inicio el flujo', async () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_URL: base.DATABASE_URL,
+      CORS_ORIGINS: 'http://localhost:5173',
+      COOKIE_NAME: 'cabales_session',
+    });
+    const auth = {
+      authenticate: vi.fn(async (): Promise<AuthContext> => ({
+        user,
+        userId: user.id,
+        sessionId: '20000000-0000-4000-8000-000000000001',
+        csrfTokenHash: hashToken(session.csrfToken),
+      })),
+      beginGoogleAuth: vi.fn(async () => ({
+        state: 'state-for-google-flow-123456789012345678901234',
+        nonce: 'nonce-for-google-flow-12345678901234567890123',
+        codeVerifier: 'verifier-for-google-flow-123456789012345678',
+        authorizationUrl: 'https://accounts.google.test/authorize',
+      })),
+      completeGoogleAuth: vi.fn(),
+    } as unknown as AuthPort;
+    const app = express();
+    app.use(cookieParser());
+    app.use('/api/v1/auth', createAuthRouter(auth, config));
+    const start = await request(app)
+      .post('/api/v1/auth/google/link/start')
+      .set('Cookie', ['cabales_session=session-token', 'cabales_session_csrf=csrf-token'])
+      .set('X-CSRF-Token', 'csrf-token');
+    expect(start.status).toBe(200);
+    const cookies = (start.headers['set-cookie'] as unknown as string[])
+      .map((cookie) => cookie.split(';', 1)[0])
+      .filter((cookie): cookie is string => cookie !== undefined);
+    const callback = await request(app)
+      .get('/api/v1/auth/google/callback')
+      .query({ state: 'state-for-google-flow-123456789012345678901234', code: 'oauth-code' })
+      .set('Cookie', [
+        ...cookies.filter((cookie) => !cookie.startsWith('cabales_session=')),
+        'cabales_session=otro-session',
+      ]);
+    expect(callback.status).toBe(400);
+    expect(auth.completeGoogleAuth).not.toHaveBeenCalled();
+  });
+
   it('valida el registro antes de llamar al servicio', async () => {
     const { app, auth } = fixture();
     const response = await request(app)

@@ -3,6 +3,7 @@ import { Router, type Request, type Response } from 'express';
 import type { AppConfig } from '../../config/env.js';
 import { csrfTokenFromCookie, requireAuth, requireCsrf } from '../../http/middleware.js';
 import { sendData } from '../../http/response.js';
+import { hashToken } from '../../shared/crypto.js';
 import { ensure } from '../../shared/errors.js';
 import { validateBody, validateQuery } from '../../shared/validation.js';
 import {
@@ -24,6 +25,7 @@ import type { AuthPort, SessionResult } from './auth.service.js';
 const GOOGLE_STATE_COOKIE = 'google_state';
 const GOOGLE_NONCE_COOKIE = 'google_nonce';
 const GOOGLE_VERIFIER_COOKIE = 'google_verifier';
+const GOOGLE_SESSION_COOKIE = 'google_session';
 const GOOGLE_TRANSACTION_MS = 10 * 60 * 1000;
 
 function agent(req: Request) {
@@ -50,6 +52,7 @@ function setGoogleTransactionCookies(
   res: Response,
   result: { state: string; nonce: string; codeVerifier: string },
   config: AppConfig,
+  sessionBinding?: string,
 ): void {
   const common = {
     ...cookieOptions(config),
@@ -59,10 +62,18 @@ function setGoogleTransactionCookies(
   res.cookie(googleCookieName(config, GOOGLE_STATE_COOKIE), result.state, common);
   res.cookie(googleCookieName(config, GOOGLE_NONCE_COOKIE), result.nonce, common);
   res.cookie(googleCookieName(config, GOOGLE_VERIFIER_COOKIE), result.codeVerifier, common);
+  if (sessionBinding)
+    res.cookie(googleCookieName(config, GOOGLE_SESSION_COOKIE), sessionBinding, common);
+  else res.clearCookie(googleCookieName(config, GOOGLE_SESSION_COOKIE), cookieOptions(config));
 }
 
 function clearGoogleTransactionCookies(res: Response, config: AppConfig): void {
-  for (const suffix of [GOOGLE_STATE_COOKIE, GOOGLE_NONCE_COOKIE, GOOGLE_VERIFIER_COOKIE])
+  for (const suffix of [
+    GOOGLE_STATE_COOKIE,
+    GOOGLE_NONCE_COOKIE,
+    GOOGLE_VERIFIER_COOKIE,
+    GOOGLE_SESSION_COOKIE,
+  ])
     res.clearCookie(googleCookieName(config, suffix), cookieOptions(config));
 }
 
@@ -105,7 +116,9 @@ export function createAuthRouter(authService: AuthPort, config: AppConfig): Rout
       'El inicio con Google no esta habilitado',
     );
     const result = await authService.beginGoogleAuth('link', req.auth!.userId);
-    setGoogleTransactionCookies(res, result, config);
+    const sessionToken = req.cookies?.[config.COOKIE_NAME] as string | undefined;
+    ensure(sessionToken, 401, 'AUTH_REQUIRED', 'Autenticacion requerida');
+    setGoogleTransactionCookies(res, result, config, hashToken(sessionToken));
     sendData(res, { authorizationUrl: result.authorizationUrl });
   });
 
@@ -122,6 +135,8 @@ export function createAuthRouter(authService: AuthPort, config: AppConfig): Rout
     const nonce = req.cookies?.[googleCookieName(config, GOOGLE_NONCE_COOKIE)] as
       string | undefined;
     const codeVerifier = req.cookies?.[googleCookieName(config, GOOGLE_VERIFIER_COOKIE)] as
+      string | undefined;
+    const sessionBinding = req.cookies?.[googleCookieName(config, GOOGLE_SESSION_COOKIE)] as
       string | undefined;
     try {
       ensure(
@@ -142,6 +157,15 @@ export function createAuthRouter(authService: AuthPort, config: AppConfig): Rout
         'OAUTH_PKCE_INVALID',
         'La transaccion de Google no es valida',
       );
+      if (sessionBinding) {
+        const sessionToken = req.cookies?.[config.COOKIE_NAME] as string | undefined;
+        ensure(
+          sessionToken && compareOpaqueValues(sessionBinding, hashToken(sessionToken)),
+          400,
+          'OAUTH_SESSION_INVALID',
+          'La transaccion de Google no pertenece a la sesion actual',
+        );
+      }
       ensure(
         state.code,
         400,

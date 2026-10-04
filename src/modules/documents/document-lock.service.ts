@@ -47,7 +47,9 @@ export class DocumentLockService {
   async status(userId: string, sessionId: string) {
     const { lock, credentials } = await this.state(userId);
     const enabled = Boolean(lock?.pinHash || credentials.length > 0);
-    const ttl = (lock?.unlockTtlMinutes ?? Math.max(1, Math.round(this.options.unlockTtlMs / 60_000))) * 60_000;
+    const ttl =
+      (lock?.unlockTtlMinutes ?? Math.max(1, Math.round(this.options.unlockTtlMs / 60_000))) *
+      60_000;
     const session = await this.db.session.findUnique({
       where: { id: sessionId, userId },
       select: { documentsUnlockedAt: true },
@@ -98,7 +100,12 @@ export class DocumentLockService {
           ? null
           : await argon2.hash(input.pin, { type: argon2.argon2id });
     const credentials = await this.db.documentWebAuthnCredential.count({ where: { userId } });
-    ensure(pinHash || credentials > 0, 422, 'DOCUMENT_LOCK_EMPTY', 'Configura un PIN o una passkey');
+    ensure(
+      pinHash || credentials > 0,
+      422,
+      'DOCUMENT_LOCK_EMPTY',
+      'Configura un PIN o una passkey',
+    );
     await this.db.documentModuleLock.upsert({
       where: { userId },
       create: {
@@ -108,7 +115,9 @@ export class DocumentLockService {
       },
       update: {
         ...(pinHash !== undefined ? { pinHash } : {}),
-        ...(input.unlockTtlMinutes !== undefined ? { unlockTtlMinutes: input.unlockTtlMinutes } : {}),
+        ...(input.unlockTtlMinutes !== undefined
+          ? { unlockTtlMinutes: input.unlockTtlMinutes }
+          : {}),
         pinFailedAttempts: 0,
         pinLockedUntil: null,
       },
@@ -133,7 +142,10 @@ export class DocumentLockService {
   }
 
   private async unlockSession(userId: string, sessionId: string) {
-    await this.db.session.updateMany({ where: { id: sessionId, userId }, data: { documentsUnlockedAt: new Date() } });
+    await this.db.session.updateMany({
+      where: { id: sessionId, userId },
+      data: { documentsUnlockedAt: new Date() },
+    });
     return this.status(userId, sessionId);
   }
 
@@ -148,47 +160,110 @@ export class DocumentLockService {
       'DOCUMENT_PIN_LOCKED',
       'El PIN esta bloqueado temporalmente',
     );
+    if (lock.pinLockedUntil && lock.pinLockedUntil <= now) {
+      await this.db.documentModuleLock.updateMany({
+        where: { userId, pinLockedUntil: { lte: now } },
+        data: { pinFailedAttempts: 0, pinLockedUntil: null },
+      });
+    }
     const valid = await argon2.verify(pinHash, pin).catch(() => false);
     if (!valid) {
-      const attempts = lock.pinFailedAttempts + 1;
-      await this.db.documentModuleLock.update({
-        where: { userId },
-        data: {
-          pinFailedAttempts: attempts >= this.options.maxPinAttempts ? 0 : attempts,
-          pinLockedUntil: attempts >= this.options.maxPinAttempts ? new Date(now.getTime() + this.options.pinLockMs) : null,
+      await this.db.documentModuleLock.updateMany({
+        where: {
+          userId,
+          pinLockedUntil: null,
+          pinFailedAttempts: lock.pinFailedAttempts,
         },
+        data: { pinFailedAttempts: { increment: 1 } },
       });
-      if (attempts >= this.options.maxPinAttempts)
+      const latest = await this.db.documentModuleLock.findUnique({ where: { userId } });
+      if (latest?.pinLockedUntil && latest.pinLockedUntil > now)
         throw new AppError(429, 'DOCUMENT_PIN_LOCKED', 'El PIN esta bloqueado temporalmente');
+      if ((latest?.pinFailedAttempts ?? 0) >= this.options.maxPinAttempts) {
+        await this.db.documentModuleLock.updateMany({
+          where: {
+            userId,
+            pinLockedUntil: null,
+            pinFailedAttempts: { gte: this.options.maxPinAttempts },
+          },
+          data: {
+            pinFailedAttempts: 0,
+            pinLockedUntil: new Date(now.getTime() + this.options.pinLockMs),
+          },
+        });
+        throw new AppError(429, 'DOCUMENT_PIN_LOCKED', 'El PIN esta bloqueado temporalmente');
+      }
       throw new AppError(403, 'DOCUMENT_PIN_INVALID', 'El PIN no es correcto');
     }
-    await this.db.documentModuleLock.update({ where: { userId }, data: { pinFailedAttempts: 0, pinLockedUntil: null } });
+    await this.db.documentModuleLock.update({
+      where: { userId },
+      data: { pinFailedAttempts: 0, pinLockedUntil: null },
+    });
     return this.unlockSession(userId, sessionId);
   }
 
-  private async saveChallenge(userId: string, type: 'registration' | 'authentication', challenge: string) {
+  private async saveChallenge(
+    userId: string,
+    type: 'registration' | 'authentication',
+    challenge: string,
+  ) {
     await this.db.documentWebAuthnChallenge.deleteMany({ where: { userId, type } });
     await this.db.documentWebAuthnChallenge.create({
-      data: { userId, type, challengeHash: hashToken(challenge), expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS) },
+      data: {
+        userId,
+        type,
+        challengeHash: hashToken(challenge),
+        expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS),
+      },
     });
   }
 
-  private async claimChallenge(userId: string, type: 'registration' | 'authentication', challenge: string) {
+  private async claimChallenge(
+    userId: string,
+    type: 'registration' | 'authentication',
+    challenge: string,
+  ) {
     const row = await this.db.documentWebAuthnChallenge.findFirst({
-      where: { userId, type, challengeHash: hashToken(challenge), usedAt: null, expiresAt: { gt: new Date() } },
+      where: {
+        userId,
+        type,
+        challengeHash: hashToken(challenge),
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       orderBy: { createdAt: 'desc' },
     });
     ensure(row, 400, 'WEBAUTHN_CHALLENGE_INVALID', 'El desafio WebAuthn no es valido o expiro');
-    const claimed = await this.db.documentWebAuthnChallenge.updateMany({ where: { id: row.id, usedAt: null }, data: { usedAt: new Date() } });
-    ensure(claimed.count === 1, 400, 'WEBAUTHN_CHALLENGE_INVALID', 'El desafio WebAuthn ya fue usado');
+    const claimed = await this.db.documentWebAuthnChallenge.updateMany({
+      where: { id: row.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    ensure(
+      claimed.count === 1,
+      400,
+      'WEBAUTHN_CHALLENGE_INVALID',
+      'El desafio WebAuthn ya fue usado',
+    );
   }
 
   private clientChallenge(response: Record<string, unknown>) {
     const nested = response.response as { clientDataJSON?: unknown } | undefined;
-    ensure(typeof nested?.clientDataJSON === 'string', 400, 'WEBAUTHN_RESPONSE_INVALID', 'La respuesta WebAuthn no es valida');
+    ensure(
+      typeof nested?.clientDataJSON === 'string',
+      400,
+      'WEBAUTHN_RESPONSE_INVALID',
+      'La respuesta WebAuthn no es valida',
+    );
     try {
-      const parsed = JSON.parse(Buffer.from(nested.clientDataJSON, 'base64url').toString('utf8')) as { challenge?: unknown };
-      ensure(typeof parsed.challenge === 'string', 400, 'WEBAUTHN_RESPONSE_INVALID', 'La respuesta WebAuthn no tiene desafio');
+      const parsed = JSON.parse(
+        Buffer.from(nested.clientDataJSON, 'base64url').toString('utf8'),
+      ) as { challenge?: unknown };
+      ensure(
+        typeof parsed.challenge === 'string',
+        400,
+        'WEBAUTHN_RESPONSE_INVALID',
+        'La respuesta WebAuthn no tiene desafio',
+      );
       return parsed.challenge;
     } catch {
       throw new AppError(400, 'WEBAUTHN_RESPONSE_INVALID', 'La respuesta WebAuthn no es valida');
@@ -197,8 +272,14 @@ export class DocumentLockService {
 
   async registrationOptions(userId: string, password: string) {
     await this.verifyPassword(userId, password);
-    const user = await this.db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true, displayName: true } });
-    const existing = await this.db.documentWebAuthnCredential.findMany({ where: { userId }, select: { credentialId: true, transports: true } });
+    const user = await this.db.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { email: true, displayName: true },
+    });
+    const existing = await this.db.documentWebAuthnCredential.findMany({
+      where: { userId },
+      select: { credentialId: true, transports: true },
+    });
     const options = await generateRegistrationOptions({
       rpName: this.options.rpName ?? 'Cabales',
       rpID: this.options.rpId,
@@ -206,7 +287,10 @@ export class DocumentLockService {
       userName: user.email,
       userDisplayName: user.displayName,
       attestationType: 'none',
-      excludeCredentials: existing.map((credential) => ({ id: credential.credentialId, transports: credential.transports as never })),
+      excludeCredentials: existing.map((credential) => ({
+        id: credential.credentialId,
+        transports: credential.transports as never,
+      })),
       authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
     });
     await this.saveChallenge(userId, 'registration', options.challenge);
@@ -222,7 +306,12 @@ export class DocumentLockService {
       expectedOrigin: this.options.origin,
       expectedRPID: this.options.rpId,
     });
-    ensure(verification.verified && verification.registrationInfo, 400, 'WEBAUTHN_REGISTRATION_FAILED', 'No se pudo registrar la passkey');
+    ensure(
+      verification.verified && verification.registrationInfo,
+      400,
+      'WEBAUTHN_REGISTRATION_FAILED',
+      'No se pudo registrar la passkey',
+    );
     const credential = verification.registrationInfo.credential;
     const existing = await this.db.documentWebAuthnCredential.findUnique({
       where: { credentialId: credential.id },
@@ -236,19 +325,45 @@ export class DocumentLockService {
     );
     await this.db.documentWebAuthnCredential.upsert({
       where: { credentialId: credential.id },
-      create: { userId, credentialId: credential.id, publicKey: Buffer.from(credential.publicKey).toString('base64'), counter: credential.counter, transports: credential.transports ?? [] },
-      update: { userId, publicKey: Buffer.from(credential.publicKey).toString('base64'), counter: credential.counter, transports: credential.transports ?? [] },
+      create: {
+        userId,
+        credentialId: credential.id,
+        publicKey: Buffer.from(credential.publicKey).toString('base64'),
+        counter: credential.counter,
+        transports: credential.transports ?? [],
+      },
+      update: {
+        userId,
+        publicKey: Buffer.from(credential.publicKey).toString('base64'),
+        counter: credential.counter,
+        transports: credential.transports ?? [],
+      },
     });
-    await this.db.documentModuleLock.upsert({ where: { userId }, create: { userId, unlockTtlMinutes: Math.round(this.options.unlockTtlMs / 60_000) }, update: {} });
+    await this.db.documentModuleLock.upsert({
+      where: { userId },
+      create: { userId, unlockTtlMinutes: Math.round(this.options.unlockTtlMs / 60_000) },
+      update: {},
+    });
     return { enabled: true, webauthnEnabled: true };
   }
 
   async authenticationOptions(userId: string) {
-    const credentials = await this.db.documentWebAuthnCredential.findMany({ where: { userId }, select: { credentialId: true, transports: true } });
-    ensure(credentials.length > 0, 400, 'DOCUMENT_PASSKEY_NOT_CONFIGURED', 'No hay una passkey configurada');
+    const credentials = await this.db.documentWebAuthnCredential.findMany({
+      where: { userId },
+      select: { credentialId: true, transports: true },
+    });
+    ensure(
+      credentials.length > 0,
+      400,
+      'DOCUMENT_PASSKEY_NOT_CONFIGURED',
+      'No hay una passkey configurada',
+    );
     const options = await generateAuthenticationOptions({
       rpID: this.options.rpId,
-      allowCredentials: credentials.map((credential) => ({ id: credential.credentialId, transports: credential.transports as never })),
+      allowCredentials: credentials.map((credential) => ({
+        id: credential.credentialId,
+        transports: credential.transports as never,
+      })),
       userVerification: 'preferred',
     });
     await this.saveChallenge(userId, 'authentication', options.challenge);
@@ -260,16 +375,34 @@ export class DocumentLockService {
     await this.claimChallenge(userId, 'authentication', challenge);
     const credentialId = typeof response.id === 'string' ? response.id : '';
     const stored = await this.db.documentWebAuthnCredential.findUnique({ where: { credentialId } });
-    ensure(stored?.userId === userId, 403, 'WEBAUTHN_CREDENTIAL_INVALID', 'La passkey no es valida');
+    ensure(
+      stored?.userId === userId,
+      403,
+      'WEBAUTHN_CREDENTIAL_INVALID',
+      'La passkey no es valida',
+    );
     const verification = await verifyAuthenticationResponse({
       response: response as never,
       expectedChallenge: challenge,
       expectedOrigin: this.options.origin,
       expectedRPID: this.options.rpId,
-      credential: { id: stored.credentialId, publicKey: Buffer.from(stored.publicKey, 'base64'), counter: stored.counter, transports: stored.transports as never },
+      credential: {
+        id: stored.credentialId,
+        publicKey: Buffer.from(stored.publicKey, 'base64'),
+        counter: stored.counter,
+        transports: stored.transports as never,
+      },
     });
-    ensure(verification.verified, 403, 'WEBAUTHN_VERIFICATION_FAILED', 'No se pudo verificar la passkey');
-    await this.db.documentWebAuthnCredential.update({ where: { id: stored.id }, data: { counter: verification.authenticationInfo.newCounter } });
+    ensure(
+      verification.verified,
+      403,
+      'WEBAUTHN_VERIFICATION_FAILED',
+      'No se pudo verificar la passkey',
+    );
+    await this.db.documentWebAuthnCredential.update({
+      where: { id: stored.id },
+      data: { counter: verification.authenticationInfo.newCounter },
+    });
     return this.unlockSession(userId, sessionId);
   }
 }

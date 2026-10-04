@@ -16,15 +16,14 @@ const booleanQuery = z.preprocess(
   (value) => (value === 'true' ? true : value === 'false' ? false : value),
   z.boolean(),
 );
-const expiryNoticeDays = z.array(z.number().int().min(1).max(365)).min(1).max(3).refine(
-  (days) => new Set(days).size === days.length,
-  'No repitas los avisos de vencimiento',
-);
+const expiryNoticeDays = z
+  .array(z.number().int().min(1).max(365))
+  .min(1)
+  .max(3)
+  .refine((days) => new Set(days).size === days.length, 'No repitas los avisos de vencimiento');
 const expiryNoticeDaysInput = z.preprocess(
   (value) =>
-    typeof value === 'string'
-      ? value.split(',').map((part) => Number(part.trim()))
-      : value,
+    typeof value === 'string' ? value.split(',').map((part) => Number(part.trim())) : value,
   expiryNoticeDays,
 );
 
@@ -90,14 +89,62 @@ export const documentLockPinSchema = z
 export const documentLockSettingsSchema = z
   .object({
     password: z.string().min(1).max(200),
-    pin: z.string().regex(/^\d{6,12}$/).nullable().optional(),
+    pin: z
+      .string()
+      .regex(/^\d{6,12}$/)
+      .nullable()
+      .optional(),
     unlockTtlMinutes: z.number().int().min(1).max(60).optional(),
   })
   .strict();
 
 export const documentLockRemoveSchema = z.object({ password: z.string().min(1).max(200) }).strict();
 
-export const webAuthnResponseSchema = z.record(z.string(), z.unknown());
+const base64Url = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .max(max)
+    .regex(/^[A-Za-z0-9_-]+$/, 'Debe ser base64url');
+
+const clientExtensionResultsSchema = z
+  .record(z.string().min(1).max(128), z.unknown())
+  .superRefine((value, context) => {
+    if (Object.keys(value).length > 32)
+      context.addIssue({ code: 'too_big', maximum: 32, origin: 'object', inclusive: true });
+  });
+
+const webAuthnClientDataSchema = z.object({
+  clientDataJSON: base64Url(16_384),
+});
+
+export const webAuthnResponseSchema = z
+  .object({
+    id: z.string().min(1).max(2_048),
+    rawId: base64Url(2_048),
+    response: z.union([
+      webAuthnClientDataSchema
+        .extend({
+          attestationObject: base64Url(1_048_576),
+          transports: z
+            .array(z.enum(['ble', 'hybrid', 'internal', 'nfc', 'usb']))
+            .max(5)
+            .optional(),
+        })
+        .strict(),
+      webAuthnClientDataSchema
+        .extend({
+          authenticatorData: base64Url(1_048_576),
+          signature: base64Url(1_048_576),
+          userHandle: base64Url(2_048).nullable().optional(),
+        })
+        .strict(),
+    ]),
+    type: z.literal('public-key'),
+    clientExtensionResults: clientExtensionResultsSchema.optional(),
+    authenticatorAttachment: z.enum(['platform', 'cross-platform']).nullable().optional(),
+  })
+  .strict();
 export const sharedTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Enlace no valido');
 
 export type UploadQuery = z.infer<typeof uploadQuerySchema>;

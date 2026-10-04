@@ -167,10 +167,7 @@ type Metrics = Record<Metric, number>;
 
 /** Logros derivados de consultas agregadas; no fabrica progreso ni miembros de grupos. */
 export class AchievementsService {
-  private readonly metricsCache = new Map<
-    string,
-    { expiresAt: number; value: Promise<Metrics> }
-  >();
+  private readonly metricsCache = new Map<string, { expiresAt: number; value: Promise<Metrics> }>();
 
   constructor(
     private readonly db: Database,
@@ -483,7 +480,13 @@ export class AchievementsService {
     });
     if (!membership) return null;
     const members = await this.db.groupMember.findMany({
-      where: { groupId },
+      // La lista devuelve puntos e insignias, por lo que respeta la misma
+      // preferencia de visibilidad que el ranking. La persona consultante
+      // conserva su propio perfil aunque haya elegido ocultarse.
+      where: {
+        groupId,
+        OR: [{ user: { achievementRankingVisible: true } }, { userId }],
+      },
       select: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
       orderBy: { joinedAt: 'asc' },
     });
@@ -522,9 +525,7 @@ export class AchievementsService {
           select: { createdById: true },
         });
         const userIds = new Set(
-          [event.userId, eventRecord?.createdById].filter(
-            (id): id is string => Boolean(id),
-          ),
+          [event.userId, eventRecord?.createdById].filter((id): id is string => Boolean(id)),
         );
         await Promise.all([...userIds].map((id) => this.evaluate(id)));
         return;

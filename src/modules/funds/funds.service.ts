@@ -254,10 +254,16 @@ export class FundsService {
       return await this.repository.update(fundId, {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.contributionPolicy !== undefined ? { contributionPolicy: input.contributionPolicy } : {}),
-        ...(input.withdrawalPolicy !== undefined ? { withdrawalPolicy: input.withdrawalPolicy } : {}),
+        ...(input.contributionPolicy !== undefined
+          ? { contributionPolicy: input.contributionPolicy }
+          : {}),
+        ...(input.withdrawalPolicy !== undefined
+          ? { withdrawalPolicy: input.withdrawalPolicy }
+          : {}),
         ...(input.closingPolicy !== undefined ? { closingPolicy: input.closingPolicy } : {}),
-        ...(input.withdrawalLimitCents !== undefined ? { withdrawalLimitCents: input.withdrawalLimitCents } : {}),
+        ...(input.withdrawalLimitCents !== undefined
+          ? { withdrawalLimitCents: input.withdrawalLimitCents }
+          : {}),
       });
     } catch (error) {
       if ((error as { code?: string })?.code === 'P2002') {
@@ -270,7 +276,11 @@ export class FundsService {
   async archive(userId: string, groupId: string, fundId: string) {
     const context = await this.access(userId, groupId, fundId);
     ensure(
-      this.policyAllows(context.fund.closingPolicy ?? FundAccessPolicy.MANAGERS, context.membership.role, context.fundMember?.role ?? null),
+      this.policyAllows(
+        context.fund.closingPolicy ?? FundAccessPolicy.MANAGERS,
+        context.membership.role,
+        context.fundMember?.role ?? null,
+      ),
       403,
       'FUND_FORBIDDEN',
       'No tienes permiso para cerrar este fondo',
@@ -382,11 +392,26 @@ export class FundsService {
     requestId: string,
   ) {
     const context = await this.access(userId, groupId, fundId);
+    const hash = requestHash(input);
+    const replay = await this.repository.findIdempotency(userId, `fund:movement:${fundId}`, key);
+    if (replay) {
+      ensure(
+        replay.requestHash === hash,
+        409,
+        'IDEMPOTENCY_CONFLICT',
+        'La llave ya se uso con otra solicitud',
+      );
+      return { data: replay.responseBody, replayed: true };
+    }
     let contributionRequestMemberId: string | undefined;
     if (input.type === 'CONTRIBUTION') {
       ensure(
         !context.fund.archivedAt &&
-          this.policyAllows(context.fund.contributionPolicy ?? FundAccessPolicy.ANY_MEMBER, context.membership.role, context.fundMember?.role ?? null),
+          this.policyAllows(
+            context.fund.contributionPolicy ?? FundAccessPolicy.ANY_MEMBER,
+            context.membership.role,
+            context.fundMember?.role ?? null,
+          ),
         403,
         'FUND_FORBIDDEN',
         'No tienes permiso para aportar a este fondo',
@@ -426,13 +451,18 @@ export class FundsService {
       }
     } else if (input.type === 'WITHDRAWAL') {
       ensure(
-        this.policyAllows(context.fund.withdrawalPolicy ?? FundAccessPolicy.MANAGERS, context.membership.role, context.fundMember?.role ?? null),
+        this.policyAllows(
+          context.fund.withdrawalPolicy ?? FundAccessPolicy.MANAGERS,
+          context.membership.role,
+          context.fundMember?.role ?? null,
+        ),
         403,
         'FUND_FORBIDDEN',
         'No tienes permiso para retirar de este fondo',
       );
       ensure(
-        context.fund.withdrawalLimitCents === null || input.amountCents <= context.fund.withdrawalLimitCents,
+        context.fund.withdrawalLimitCents === null ||
+          input.amountCents <= context.fund.withdrawalLimitCents,
         422,
         'WITHDRAWAL_LIMIT_EXCEEDED',
         'El retiro supera el limite configurado para este fondo',
@@ -444,7 +474,6 @@ export class FundsService {
         'Solo quien administra el fondo registra retiros o ajustes',
       );
     }
-    const hash = requestHash(input);
     const signed = input.type === 'WITHDRAWAL' ? -input.amountCents : input.amountCents;
     const result = await this.repository.createMovementAtomic({
       fundId,
